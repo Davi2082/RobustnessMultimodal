@@ -21,6 +21,7 @@ from utils import (
     bertattack,
     load_available_datasets,
     save_predictions,
+    save_perturbed_texts,
 )
 from configuration import (
     SOURCE_LABEL,
@@ -30,8 +31,12 @@ from configuration import (
     MAX_WORDS_TO_ATTACK,
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
+    MIN_TXT_SIMILARITY,
+    DEVICE,
+    DEVICE_MLM,
+    SUBSET_SIZE,
 )
-from paths import RESULT_PATH, CLEAN_TEXT_PARAMS
+from paths import RESULT_PATH, CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT
 import my_datasets
 
 # Main evaluation function
@@ -66,11 +71,12 @@ def main():
     parser.add_argument("--max_words_to_attack", type=int, default=MAX_WORDS_TO_ATTACK)
     parser.add_argument("--max_candidates_per_word", type=int, default=MAX_CANDIDATES_PER_WORD)
     parser.add_argument("--max_words_for_importance", type=int, default=MAX_WORDS_FOR_IMPORTANCE)
+    parser.add_argument("--min_txt_similarity", type=float, default=MIN_TXT_SIMILARITY)
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device("cuda:1")
-    device_mlm = torch.device("cuda:2")
+    device = torch.device(DEVICE)
+    device_mlm = torch.device(DEVICE_MLM)
 
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)
@@ -85,7 +91,7 @@ def main():
     load_func = load_functions[args.dataset]
 
     # Results dir setup
-    output_dir = os.path.join(args.results_path, f"{args.dataset}", "perturbed", "text")
+    output_dir = os.path.join(args.results_path, "perturbed", "text")
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
@@ -99,12 +105,12 @@ def main():
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation
-    dataloader_test = DataLoader(
-        dataset_test,
-        batch_size=args.batch_size,
-        shuffle=False,
-    )
+    # Dataloader creation (optionally restricted to the first N samples for quick tests)
+    if SUBSET_SIZE is not None:
+        sampler = list(range(min(SUBSET_SIZE, len(dataset_test))))
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
+    else:
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
 
     y_true_list = [] # True labels 0 V 1
     indices_list = [] # Indices of the samples in the original dataset
@@ -112,12 +118,14 @@ def main():
     logits_list = [] # Logits [-inf, +inf]
     scores_list = [] # Scores [0, 1]
 
+    perturbed_text_rows = [] # (index, original, perturbed) for qualitative analysis
+
     for images, labels, texts, imgs_path, indices in tqdm(dataloader_test, desc="Evaluating", total=len(dataloader_test)):
         images = images.to(device)
         texts = texts.to(device)
 
         txts_per_list = [] # Perturbed texts
-        
+
         # Challenging the model
         for i, label in tqdm(enumerate(labels.tolist()), desc="Challenging the model", total=len(labels), leave=False):
             # Clean news
@@ -133,15 +141,16 @@ def main():
                 torch.cuda.empty_cache()
 
                 # Ensure the text corruption is effective, if not use the original text as corrupted text
-                if txt_similarity < 0.5:
+                if txt_similarity < args.min_txt_similarity:
                     news_txt_per = news
                     txt_similarity = 1.0
 
-                # Create multimodal corrupted news
-                news_per = {
-                    "txt": news_txt_per["txt"],
-                    "img": news["img"],
-                }
+                # Dump the perturbed text for qualitative analysis
+                perturbed_text_rows.append({
+                    "index": indices[i].item(),
+                    "original": news["txt"],
+                    "perturbed": news_txt_per["txt"],
+                })
             else:
                 news_txt_per = news
                 txt_similarity = 1.0
@@ -172,7 +181,10 @@ def main():
     # ---------- RESULTS ----------
     # Save results
     save_predictions(y_true, y_preds, scores, logits, indices, os.path.join(output_dir, "perturbed_results.csv"))
-    
+
+    # Dump perturbed texts for qualitative analysis
+    save_perturbed_texts(DATA_PERTURBED_TEXT, perturbed_text_rows)
+
     # Save "Parameters" in a file
     attack_parameters = {
         "Source Label": args.source_label,

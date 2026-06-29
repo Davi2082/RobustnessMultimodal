@@ -1,4 +1,3 @@
-from email.mime import base
 import os
 import json
 import argparse
@@ -20,9 +19,11 @@ if __name__ == "__main__":
     parser.add_argument("--roc-set", type=str, help="Name of ROC comparison group")
     args = parser.parse_args()
 
-    if args.type == "perturbed" and args.perturbation_type is None:
-        parser.error("--perturbation_type is required when --type is perturbed")
+    if args.type == "perturbed" and args.modality == "feature-fusion" and args.perturbation_type is None:
+        parser.error("--perturbation_type is required for feature-fusion when --type is perturbed")
     elif args.type == "clean":
+        args.perturbation_type = ""
+    elif args.perturbation_type is None:
         args.perturbation_type = ""
         
     if args.modality == "late-fusion" and args.mode is None:
@@ -30,8 +31,23 @@ if __name__ == "__main__":
     elif args.modality != "late-fusion":
         args.mode = ""
 
-    results_file = f"{'perturbed_' if args.type == 'perturbed' else ''}results.csv"
-    base = os.path.join(RESULT_PATH, args.type, args.modality, args.mode, args.perturbation_type)
+    # Resolve path and filename based on actual output structure of each attack script
+    if args.modality == "feature-fusion" and args.type == "perturbed":
+        # multimodal_attack.py writes all variants into one flat directory with distinct filenames
+        base = os.path.join(RESULT_PATH, "perturbed", "feature-fusion")
+        fname_map = {
+            "biperturbed":     "perturbed_results.csv",
+            "text-perturbed":  "txts_perturbed_results.csv",
+            "image-perturbed": "imgs_perturbed_results.csv",
+        }
+        results_file = fname_map[args.perturbation_type]
+    elif args.modality == "late-fusion" and args.type == "perturbed" and args.perturbation_type == "biperturbed":
+        # late_fusion_perturbation.py writes biperturbed directly under the mode directory
+        base = os.path.join(RESULT_PATH, "perturbed", "late-fusion", args.mode)
+        results_file = "perturbed_results.csv"
+    else:
+        results_file = f"{'perturbed_' if args.type == 'perturbed' else ''}results.csv"
+        base = os.path.join(RESULT_PATH, args.type, args.modality, args.mode, args.perturbation_type)
     df = pd.read_csv(os.path.join(base, results_file))
 
     y_true = df["label"]

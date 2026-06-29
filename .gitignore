@@ -1,0 +1,12 @@
+# Files
+*.md
+!README.md
+*.zip
+_*
+
+# Dirs
+data_perturbed/
+data/Recovery/images/
+results/
+model/
+logs/

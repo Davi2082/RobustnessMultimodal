@@ -21,10 +21,13 @@ from utils import (
 from configuration import (
     NAME_LLM,
     NAME_IMG_EMBED,
-    WEIGHTS_PATH,
+    TEXT_WEIGHTS_PATH,
+    IMAGE_WEIGHTS_PATH,
     BATCH_SIZE,
     N_TOKENS,
     THRESHOLD,
+    DEVICE_EVAL,
+    SUBSET_SIZE,
 )
 from paths import RESULT_PATH
 
@@ -39,7 +42,7 @@ def main():
     parser.add_argument("--name_llm", type=str, default=NAME_LLM)
     parser.add_argument("--name_img_embed", type=str, default=NAME_IMG_EMBED)
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
-    parser.add_argument("--model_path", type=str, default=WEIGHTS_PATH)
+    parser.add_argument("--model_path", type=str, default=None)
     parser.add_argument("--n_tokens", type=int, default=N_TOKENS)
     parser.add_argument("--merge_tokens", type=int, default=0)
     parser.add_argument("--lora_alpha", type=int)
@@ -62,19 +65,27 @@ def main():
     }
 
     # Device setting
-    device = torch.device("cuda")
+    device = torch.device(DEVICE_EVAL)
 
     # Model with relative tokenizer and processor loading
     if args.modality == "late-fusion":
         args.modality = "text"
+        if args.model_path is None:
+            args.model_path = TEXT_WEIGHTS_PATH
         txt_model, tokenizer, _ = load_model(device, args)
-        parameters["Model 2 Path"] = args.model_path
+        parameters["Text Model Path"] = args.model_path
         parameters["Fusion Mode"] = args.late_fusion_mode
-        args.model_path = WEIGHTS_PATH
+        args.model_path = IMAGE_WEIGHTS_PATH
         args.modality = "image"
         img_model, _, processor = load_model(device, args)
+        parameters["Image Model Path"] = args.model_path
         args.modality = "late-fusion"
     else:
+        if args.model_path is None:
+            if args.modality == "text":
+                args.model_path = TEXT_WEIGHTS_PATH
+            elif args.modality == "image":
+                args.model_path = IMAGE_WEIGHTS_PATH
         model, tokenizer, processor = load_model(device, args)
     
     # Other parameters saved in the parameters dictionary
@@ -102,9 +113,9 @@ def main():
     load_func = load_functions[args.dataset]
 
     # Results dir setup
-    output_dir = os.path.join(args.results_path, f"{args.dataset}", "clean", f"{args.modality}")
+    output_dir = os.path.join(args.results_path, "clean", args.modality)
     if args.modality == "late-fusion":
-        output_dir = os.path.join(output_dir, f"{args.late_fusion_mode}") 
+        output_dir = os.path.join(output_dir, args.late_fusion_mode)
     os.makedirs(output_dir, exist_ok=True)
     
     # Dataset obtaination
@@ -118,12 +129,12 @@ def main():
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation
-    dataloader_test = DataLoader(
-        dataset_test,
-        batch_size=args.batch_size,
-        shuffle=False,
-    )
+    # Dataloader creation (optionally restricted to the first N samples for quick tests)
+    if SUBSET_SIZE is not None:
+        sampler = list(range(min(SUBSET_SIZE, len(dataset_test))))
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
+    else:
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
     
     y_true_list = [] # True labels 0 V 1
     indices_list = [] # Indices of the samples in the original dataset

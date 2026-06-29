@@ -6,6 +6,36 @@ The project is organized as a modular pipeline. Clean inference, adversarial att
 
 ---
 
+## Quick start
+
+To run the **entire pipeline end-to-end with the default configuration** — no
+need to edit `configuration.py` or `paths.py` — use the orchestrator script:
+
+```bash
+python run_pipeline.py
+```
+
+It runs every stage in order and stops at the first failure:
+
+1. clean evaluation — text, image, feature-fusion (`eval.py`);
+2. adversarial attacks — image (PGD), text (BERTAttack), multimodal (`attacks/`);
+3. late-fusion aggregation (`late_fusion_perturbation.py`);
+4. metrics + ROC plots (`create_rocs_plots.py`).
+
+Each stage logs to its own file under `logs/` (e.g. `logs/eval_text.log`,
+`logs/multimodal_attack.log`). Results land under `RESULT_PATH` and ROC plots
+under the `figures/` ROC directory (both defined in `paths.py`).
+
+This assumes the environment, datasets, and model weights are already in place
+(steps 1–6 below). For a fast smoke test of the whole pipeline, set
+`SUBSET_SIZE` in `configuration.py` to a small number (see
+[Quick test runs](#quick-test-runs-subset_size)) before launching it.
+
+The individual scripts documented in the rest of this README remain available
+for running or customizing a single stage.
+
+---
+
 ## Requirements
 
 Reference environment:
@@ -86,22 +116,39 @@ pip install numpy==1.26.4
 
 ## 4. Configure the project
 
-Default values are defined in `configuration.py`.
+Model and attack hyperparameters are defined in `configuration.py`.
+Filesystem paths (result directories, CSV paths, weight file paths) are defined in `paths.py`.
 
 Before running the pipeline, check at least:
 
-- model and encoder names;
-- model-weight paths;
-- batch size;
-- maximum number of text tokens;
+- model and encoder names (`NAME_LLM`, `NAME_IMG_EMBED`);
+- model-weight paths (`TEXT_WEIGHTS_PATH`, `IMAGE_WEIGHTS_PATH`, `FF_WEIGHTS_PATH`);
+- batch size and maximum token length;
 - classification threshold;
-- result root directory;
-- PGD parameters;
-- BERTAttack parameters;
+- result root directory (`RESULT_PATH` in `paths.py`);
+- PGD parameters (`EPSILON`, `PGD_ITERS`, `ALPHA_FACTOR`);
+- BERTAttack parameters (`K_BERT_ATTACK`, etc.);
 - source and target labels;
-- asymmetric-attack setting.
+- subset size for quick test runs (`SUBSET_SIZE`).
 
 Most values can also be overridden through command-line arguments.
+
+### Quick test runs (`SUBSET_SIZE`)
+
+`SUBSET_SIZE` in `configuration.py` restricts both the clean evaluation
+(`eval.py`) and all three attacks to the **first `N` samples** of the test set,
+so you can sanity-check the full pipeline in seconds instead of running on the
+whole dataset:
+
+```python
+# configuration.py
+SUBSET_SIZE = None  # full dataset (default)
+SUBSET_SIZE = 8     # only the first 8 samples — quick smoke test
+```
+
+It is a single switch that applies everywhere (clean eval + image / text /
+multimodal attacks), so the clean and perturbed result sets stay aligned on the
+same samples. Set it back to `None` for a full run.
 
 ### CUDA devices
 
@@ -207,7 +254,7 @@ The text and image models may use different weight files. Make sure that each cl
 The metric and plotting scripts expect the following structure:
 
 ```text
-data/
+results/
 └── Recovery/
     └── classification_results/
         ├── clean/
@@ -246,23 +293,15 @@ data/
 
 ### Path consistency
 
-Some scripts use paths derived from `--results_path` and `--dataset`, while others currently contain ReCOVery-specific paths.
-
-Before running the complete pipeline, make sure that the following all refer to the same result tree:
-
-1. `RESULT_PATH` in `configuration.py`;
-2. the `--results_path` command-line argument;
-3. hardcoded paths in the attack scripts;
-4. the `BASE` path in `late_fusion_perturbation.py`;
-5. the base path in `metrics.py`.
+All path constants are centralised in `paths.py` (`RESULT_PATH`, `CLEAN_BASE`, `PERT_BASE`, and specific CSV / parameter paths). The `--results_path` CLI argument defaults to `RESULT_PATH`.
 
 The commands below assume:
 
 ```text
-data/Recovery/classification_results
+results/Recovery/classification_results
 ```
 
-as the result root.
+as the result root (the value of `RESULT_PATH` in `paths.py`).
 
 ---
 
@@ -319,7 +358,7 @@ image|clean
 `eval.py` accepts `late-fusion` and one aggregation mode:
 
 ```bash
-python eval.py --modality late-fusion --mode mean
+python eval.py --modality late-fusion --late_fusion_mode mean
 ```
 
 Available modes:
@@ -337,7 +376,7 @@ max
 | Argument | Type | Description |
 | --- | --- | --- |
 | `--modality` | `str` | `feature-fusion`, `intermediate-fusion`, `late-fusion`, `text`, or `image` |
-| `--mode` | `str` | Late-fusion aggregation: `mean`, `min`, or `max` |
+| `--late_fusion_mode` | `str` | Late-fusion aggregation: `mean`, `min`, or `max` |
 | `--threshold` | `float` | Classification threshold |
 | `--name_llm` | `str` | Text-encoder model name |
 | `--name_img_embed` | `str` | Image-encoder model name |
@@ -373,12 +412,11 @@ Clean evaluation for the corresponding model must therefore be completed first.
 The attack direction is controlled by:
 
 ```text
---asymmetric
 --source_label
 --target_label
 ```
 
-In the current scripts, perturbations are generated for samples whose ground-truth label matches `source_label`. Samples from the other class remain clean.
+Perturbations are generated for samples whose ground-truth label matches `source_label`. Samples from the other class remain clean (pass through unchanged).
 
 ---
 
@@ -393,7 +431,7 @@ clean/text/parameters.json
 Run:
 
 ```bash
-python text_attack.py
+python attacks/text_attack.py
 ```
 
 The script:
@@ -427,7 +465,6 @@ Relevant arguments:
 --max_words_for_importance
 --source_label
 --target_label
---asymmetric
 ```
 
 ---
@@ -443,7 +480,7 @@ clean/image/parameters.json
 Run:
 
 ```bash
-python image_attack.py
+python attacks/image_attack.py
 ```
 
 The script applies PGD to the image model and evaluates it on perturbed images.
@@ -469,7 +506,6 @@ Relevant arguments:
 --alpha_factor
 --source_label
 --target_label
---asymmetric
 ```
 
 ---
@@ -485,7 +521,7 @@ clean/feature-fusion/parameters.json
 Run:
 
 ```bash
-python multimodal_attack.py
+python attacks/multimodal_attack.py
 ```
 
 For each attacked sample, the script generates both a text perturbation and an image perturbation.
@@ -522,7 +558,6 @@ Relevant arguments:
 --max_words_for_importance
 --source_label
 --target_label
---asymmetric
 ```
 
 ---
@@ -568,13 +603,7 @@ late-fusion-max|biperturbed
 - the image score is produced from a perturbed image;
 - the two scores are subsequently aggregated.
 
-The current script uses this fixed base path:
-
-```text
-data/Recovery/classification_results/perturbed
-```
-
-Change `BASE` when using another dataset or result location.
+Input and output paths are read from `paths.py` (`PERT_BASE`, `PER_TEXT_CSV`, etc.). To change the result root, update `RESULT_PATH` in `paths.py`.
 
 ---
 
@@ -593,19 +622,19 @@ python metrics.py --type clean --modality feature-fusion
 Both modalities perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type biperturbed
 ```
 
 Only text perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion --mode text-perturbed
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type text-perturbed
 ```
 
 Only image perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion --mode image-perturbed
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type image-perturbed
 ```
 
 ### Text model
@@ -635,9 +664,9 @@ python metrics.py --type clean --modality late-fusion --mode max
 Perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality late-fusion --mode mean
-python metrics.py --type perturbed --modality late-fusion --mode min
-python metrics.py --type perturbed --modality late-fusion --mode max
+python metrics.py --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
+python metrics.py --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
+python metrics.py --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
 ```
 
 Each configuration produces:
@@ -647,7 +676,7 @@ metrics.json
 confusion_matrix.png
 ```
 
-The current implementation inverts labels, predictions, and scores before computing the metrics:
+The implementation inverts labels, predictions, and scores before computing metrics:
 
 ```python
 y_true = 1 - y_true
@@ -655,15 +684,9 @@ y_pred = 1 - y_pred
 scores = 1 - scores
 ```
 
-This makes the fake-news class the positive class for precision, recall, F1, and ROC/AUC.
+This makes the fake-news class (label 0) the positive class for precision, recall, F1, and ROC/AUC.
 
-The current script uses:
-
-```text
-data/Recovery/classification_results
-```
-
-as a fixed root.
+The result root is `RESULT_PATH` from `paths.py` (`results/Recovery/classification_results`).
 
 ---
 
@@ -716,17 +739,17 @@ python eval.py --modality image
 Optionally create the clean late-fusion configurations:
 
 ```bash
-python eval.py --modality late-fusion --mode mean
-python eval.py --modality late-fusion --mode min
-python eval.py --modality late-fusion --mode max
+python eval.py --modality late-fusion --late_fusion_mode mean
+python eval.py --modality late-fusion --late_fusion_mode min
+python eval.py --modality late-fusion --late_fusion_mode max
 ```
 
 ### Step 2: generate adversarial predictions
 
 ```bash
-python multimodal_attack.py
-python text_attack.py
-python image_attack.py
+python attacks/multimodal_attack.py
+python attacks/text_attack.py
+python attacks/image_attack.py
 ```
 
 ### Step 3: organize feature-fusion outputs
@@ -784,7 +807,7 @@ python metrics.py --type clean --modality feature-fusion
 
 ```bash
 python eval.py --modality text
-python text_attack.py
+python attacks/text_attack.py
 python metrics.py --type clean --modality text
 python metrics.py --type perturbed --modality text
 ```
@@ -793,7 +816,7 @@ python metrics.py --type perturbed --modality text
 
 ```bash
 python eval.py --modality image
-python image_attack.py
+python attacks/image_attack.py
 python metrics.py --type clean --modality image
 python metrics.py --type perturbed --modality image
 ```
@@ -802,26 +825,26 @@ python metrics.py --type perturbed --modality image
 
 ```bash
 python eval.py --modality feature-fusion
-python multimodal_attack.py
+python attacks/multimodal_attack.py
 
-python metrics.py --type perturbed --modality feature-fusion
-python metrics.py --type perturbed --modality feature-fusion --mode text-perturbed
-python metrics.py --type perturbed --modality feature-fusion --mode image-perturbed
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type biperturbed
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type text-perturbed
+python metrics.py --type perturbed --modality feature-fusion --perturbation_type image-perturbed
 ```
 
 ### Perturbed late fusion only
 
 ```bash
-python eval.py --modality text  --dataset Recovery --model_path model/text_model_weights.pt
-python eval.py --modality image --dataset Recovery --model_path model/image_model_weights.pt
+python eval.py --modality text
+python eval.py --modality image
 
-python text_attack.py
-python image_attack.py
+python attacks/text_attack.py
+python attacks/image_attack.py
 python late_fusion_perturbation.py
 
-python metrics.py --type perturbed --modality late-fusion --mode mean
-python metrics.py --type perturbed --modality late-fusion --mode min
-python metrics.py --type perturbed --modality late-fusion --mode max
+python metrics.py --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
+python metrics.py --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
+python metrics.py --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
 ```
 
 ---
@@ -885,12 +908,8 @@ perturbed/feature-fusion/image-perturbed/perturbed_results.csv
 
 Check:
 
-- `RESULT_PATH` in `configuration.py`;
-- `--results_path`;
-- the dataset name;
-- hardcoded paths in the attack scripts;
-- `BASE` in `late_fusion_perturbation.py`;
-- the base path in `metrics.py`.
+- `RESULT_PATH` in `paths.py` (the canonical result root);
+- `--results_path` CLI argument (defaults to `RESULT_PATH`).
 
 ### The test annotation file is not found
 

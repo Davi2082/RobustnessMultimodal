@@ -3,13 +3,29 @@ import os
 # Custom imports
 from utils import create_late_fusion, create_late_fusion_parameters
 from paths import (
-    PERT_BASE,
+    RESULT_PATH, PERT_BASE,
     CLEAN_TEXT_CSV, CLEAN_IMAGE_CSV, PER_TEXT_CSV, PER_IMAGE_CSV,
     CLEAN_TEXT_PARAMS, CLEAN_IMAGE_PARAMS, PER_TEXT_PARAMS, PER_IMAGE_PARAMS,
 )
 
 
 if __name__ == "__main__":
+    # Clean late-fusion: combine clean text + clean image scores
+    for fusion in ["mean", "min", "max"]:
+        clean_out_dir = os.path.join(RESULT_PATH, "clean", "late-fusion", fusion)
+        create_late_fusion(CLEAN_TEXT_CSV, CLEAN_IMAGE_CSV, clean_out_dir, fusion, filename="results.csv")
+        create_late_fusion_parameters(
+            text_parameters=CLEAN_TEXT_PARAMS,
+            image_parameters=CLEAN_IMAGE_PARAMS,
+            output_dir=clean_out_dir,
+            fusion_type=fusion,
+            scenario="clean",
+            text_state="clean",
+            image_state="clean",
+            text_csv=CLEAN_TEXT_CSV,
+            image_csv=CLEAN_IMAGE_CSV,
+        )
+
     scenarios = {
         # Testo perturbato + immagine perturbata
         "both-perturbed": {

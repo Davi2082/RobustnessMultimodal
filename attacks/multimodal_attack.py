@@ -1,3 +1,4 @@
+from pyexpat import model
 import sys
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
@@ -21,11 +22,13 @@ from utils import (
     bertattack,
     load_available_datasets,
     save_predictions,
+    save_perturbed_image,
+    save_perturbed_texts,
 )
 from configuration import (
     SOURCE_LABEL,
     TARGET_LABEL,
-    ALTERNATION_ROUNDS
+    ALTERNATION_ROUNDS,
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
@@ -34,8 +37,12 @@ from configuration import (
     MAX_WORDS_TO_ATTACK,
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
+    MIN_TXT_SIMILARITY,
+    DEVICE,
+    DEVICE_MLM,
+    SUBSET_SIZE,
 )
-from paths import RESULT_PATH, CLEAN_FF_PARAMS
+from paths import RESULT_PATH, CLEAN_FF_PARAMS, DATA_PERTURBED_FF
 import my_datasets
 
 # Main evaluation function
@@ -49,7 +56,7 @@ def main():
     # Here there are the attack parameters
     parser = argparse.ArgumentParser()
     parser.add_argument("--modality", type=str, default=parameters["Modality"], choices=["feature-fusion", "intermediate-fusion", "text", "image"])
-    parser.add_argument("--name_llm", type=str, default=parameters["LLM Name"])
+    parser.add_argument("--name_llm", type=str, default=parameters["Name LLM"])
     parser.add_argument("--name_img_embed", type=str, default=parameters["Image Embedder Name"])
     parser.add_argument("--batch_size", type=int, default=parameters["Batch Size"])
     parser.add_argument("--model_path", type=str, default=parameters["Model Path"])
@@ -74,11 +81,12 @@ def main():
     parser.add_argument("--max_words_to_attack", type=int, default=MAX_WORDS_TO_ATTACK)
     parser.add_argument("--max_candidates_per_word", type=int, default=MAX_CANDIDATES_PER_WORD)
     parser.add_argument("--max_words_for_importance", type=int, default=MAX_WORDS_FOR_IMPORTANCE)
+    parser.add_argument("--min_txt_similarity", type=float, default=MIN_TXT_SIMILARITY)
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device("cuda:1")
-    device_mlm = torch.device("cuda:2")
+    device = torch.device(DEVICE)
+    device_mlm = torch.device(DEVICE_MLM)
 
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)
@@ -93,7 +101,7 @@ def main():
     load_func = load_functions[args.dataset]
 
     # Results dir setup
-    output_dir = os.path.join(args.results_path, f"{args.dataset}", "feature-fusion", "perturbed")
+    output_dir = os.path.join(args.results_path, "perturbed", "feature-fusion")
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
@@ -107,12 +115,12 @@ def main():
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation
-    dataloader_test = DataLoader(
-        dataset_test,
-        batch_size=args.batch_size,
-        shuffle=False,
-    )
+    # Dataloader creation (optionally restricted to the first N samples for quick tests)
+    if SUBSET_SIZE is not None:
+        sampler = list(range(min(SUBSET_SIZE, len(dataset_test))))
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
+    else:
+        dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
 
     y_true_list = [] # True labels 0 V 1
     indices_list = [] # Indices of the samples in the original dataset
@@ -128,6 +136,8 @@ def main():
     # Lists that contain logits and scores with only image perturbed
     logits_imgs_per_list = []
     scores_imgs_per_list = []
+
+    perturbed_text_rows = [] # (index, original, perturbed) for qualitative analysis
 
     for images, labels, texts, imgs_path, indices in tqdm(dataloader_test, desc="Evaluating batches", total=len(dataloader_test)):
         images = images.to(device)
@@ -145,46 +155,35 @@ def main():
             }
             # Only consider correctly classified samples
             if label == args.source_label:
+                # news_per is the single running perturbed sample: it starts clean and
+                # accumulates the image and text perturbations across the alternation rounds
+                news_per = news
                 for _ in range(args.alternation_rounds):
                     # Image perturbation on the current version of the sample
-                    news_img_per, ssim_pgd, _ = img_perturbation(model, tokenizer, processor, args, news_per, torch.tensor([label], device=device))
+                    news_img_per, _, _ = img_perturbation(model, tokenizer, processor, args, news_per, torch.tensor([label], device=device))
+                    news_per = {"txt": news_per["txt"], "img": news_img_per["img"]}
 
                     # Text perturbation on the current version of the sample
                     with torch.no_grad():
-                        news_txt_per, txt_similarity = bertattack(
-                            model,
-                            tokenizer,
-                            processor,
-                            args,
-                            news_per,
-                            label,
-                            device,
-                            bertattack_tokenizer,
-                            bertattack_mlm,
-                            device_mlm
-                        )
-
+                        news_txt_per, txt_similarity = bertattack(model, tokenizer, processor, args, news_per, label, device, bertattack_tokenizer, bertattack_mlm, device_mlm)
                     torch.cuda.empty_cache()
 
-                    # If text perturbation is not valid/effective, keep the current text
-                    if txt_similarity < 0.5:
-                        news_txt_per = news_per
-                        txt_similarity = 1.0
-
-                    # Create the new multimodal perturbed sample
-                    news_per = {
-                        "txt": news_txt_per["txt"],
-                        "img": to_pil(news_img_per["img"].squeeze(0).cpu()),
-                    }
+                    # Only keep the text perturbation if it stays semantically similar enough
+                    if txt_similarity >= args.min_txt_similarity:
+                        news_per = {"txt": news_txt_per["txt"], "img": news_per["img"]}
+                # Dump the perturbed image + text for qualitative analysis
+                save_perturbed_image(os.path.join(DATA_PERTURBED_FF, "images"), indices[i].item(), news_per["img"])
+                perturbed_text_rows.append({
+                    "index": indices[i].item(),
+                    "original": news["txt"],
+                    "perturbed": news_per["txt"],
+                })
             else:
-                # If the label is true we take the not perturbed sample
-                img_per = news["img"]
-                news_txt_per = news
-                txt_similarity = 1.0
-                ssim_pgd = 1.0
-            # Adding the new news to the list of news perturbed (or not if is a true sample)
-            txts_per_list.append(news_txt_per["txt"])
-            imgs_per_list.append(img_per)
+                # Correctly-classified Real sample: keep it unperturbed
+                news_per = news
+            # Adding the new (perturbed or clean) sample to the batch lists
+            txts_per_list.append(news_per["txt"])
+            imgs_per_list.append(news_per["img"])
 
         # Tokenization of multimodal corrupted texts
         txts_per_list = tokenizer(txts_per_list, return_tensors="pt", padding="max_length", truncation=True, return_attention_mask=False, max_length=args.n_tokens).to(device)
@@ -240,7 +239,10 @@ def main():
     save_predictions(y_true, y_preds, scores, logits, indices, os.path.join(output_dir, "perturbed_results.csv"))
     save_predictions(y_true, y_txts_per_preds, txts_per_scores, txts_per_logits, indices, os.path.join(output_dir, "txts_perturbed_results.csv"))
     save_predictions(y_true, y_imgs_per_preds, imgs_per_scores, imgs_per_logits, indices, os.path.join(output_dir, "imgs_perturbed_results.csv"))
-    
+
+    # Dump perturbed texts for qualitative analysis (images already dumped during the loop)
+    save_perturbed_texts(DATA_PERTURBED_FF, perturbed_text_rows)
+
     # Save "Parameters" in a file
     attack_parameters = {
         "Source Label": args.source_label,
