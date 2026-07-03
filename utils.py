@@ -32,7 +32,7 @@ import my_datasets
 
 from themis_model import get_Themis
 from bertattack import attack, Feature
-from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED
+from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
 
 # Utilities for logging
@@ -286,7 +286,7 @@ def bertattack(
     bert_tokenizer,
     mlm_model,
     mlm_device,
-    use_bpe=0,
+    use_bpe=USE_BPE,
 ):
     feat = Feature(news["txt"], int(label))
 
@@ -314,7 +314,8 @@ def bertattack(
         use_bpe=use_bpe,
         threshold_pred_score=args.threshold_pred_score,
         target_device=device,
-        mlm_device=mlm_device
+        mlm_device=mlm_device,
+        max_change_ratio=MAX_CHANGE_RATIO,
     )
 
     corr_txt = attacked_feat.final_adverse
