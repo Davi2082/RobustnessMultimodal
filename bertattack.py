@@ -223,7 +223,7 @@ def get_bpe_substitues(substitutes, tokenizer, mlm_model):
     return final_words
 
 
-def attack(feature, tgt_model, mlm_model, tokenizer, k, batch_size, max_length=512, cos_mat=None, w2i={}, i2w={}, use_bpe=1, threshold_pred_score=0.3, target_device="cuda:0", mlm_device="cuda:1"):
+def attack(feature, tgt_model, mlm_model, tokenizer, k, batch_size, max_length=512, cos_mat=None, w2i={}, i2w={}, use_bpe=1, threshold_pred_score=0.3, target_device="cuda:0", mlm_device="cuda:1", max_change_ratio=0.4):
     # MLM-process
     words, sub_words, keys = _tokenize(feature.seq, tokenizer)
 
@@ -260,7 +260,7 @@ def attack(feature, tgt_model, mlm_model, tokenizer, k, batch_size, max_length=5
     final_words = copy.deepcopy(words)
 
     for top_index in list_of_index:
-        if feature.change > int(0.4 * (len(words))):
+        if feature.change > int(max_change_ratio * (len(words))):
             feature.success = 1  # exceed
             return feature
 

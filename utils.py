@@ -32,7 +32,7 @@ import my_datasets
 
 from themis_model import get_Themis
 from bertattack import attack, Feature
-from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED
+from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
 
 # Utilities for logging
@@ -286,7 +286,7 @@ def bertattack(
     bert_tokenizer,
     mlm_model,
     mlm_device,
-    use_bpe=0,
+    use_bpe=USE_BPE,
 ):
     feat = Feature(news["txt"], int(label))
 
@@ -314,7 +314,8 @@ def bertattack(
         use_bpe=use_bpe,
         threshold_pred_score=args.threshold_pred_score,
         target_device=device,
-        mlm_device=mlm_device
+        mlm_device=mlm_device,
+        max_change_ratio=MAX_CHANGE_RATIO,
     )
 
     corr_txt = attacked_feat.final_adverse
@@ -781,6 +782,165 @@ def plot_shift_arrows(
     plt.savefig(out_file)
     plt.close()
 
+def plot_score_space_fig7(
+    y_true,
+    text_clean,
+    image_clean,
+    text_pert,
+    image_pert,
+    out_file,
+    fusion="min",
+    threshold=0.5,
+    source_label=0,
+    grid=400,
+    pad=2.0,
+):
+    """Recreation of the score-space panel of Biggio et al. (TPAMI 2017, Fig. 7),
+    but on the model LOGITS instead of the sigmoid scores. Themis is heavily
+    overconfident, so the [0,1] score space is degenerate (all points pin to the
+    corners); logits keep the samples spread out. The fusion is still computed on
+    the sigmoid scores, so the background heatmap is the fused score f(s) and the
+    decision boundary at score-threshold 0.5 maps to the origin in logit space:
+        min  -> L-corner at (0,0)      max -> inverted-L at (0,0)
+        mean -> anti-diagonal  logit_text + logit_image = 0
+
+    Axes are the two unimodal model logits. Attacks only target `source_label`
+    (Fake) samples, so the three attacked classes are displaced Fakes:
+        text-attacked  = (perturbed text logit, clean image logit)
+        image-attacked = (clean text logit, perturbed image logit)
+        both-attacked  = (perturbed text logit, perturbed image logit)
+    """
+    y_true = np.asarray(y_true).reshape(-1)
+    tc = np.asarray(text_clean).reshape(-1)
+    ic = np.asarray(image_clean).reshape(-1)
+    tp = np.asarray(text_pert).reshape(-1)
+    ip = np.asarray(image_pert).reshape(-1)
+
+    fake = y_true == source_label
+    real = ~fake
+
+    def _sigmoid(z):
+        return 1.0 / (1.0 + np.exp(-z))
+
+    # Axis ranges from all plotted logits (both clean and perturbed), padded
+    xs = np.concatenate([tc, tp[fake]])
+    ys = np.concatenate([ic, ip[fake]])
+    xlo, xhi = xs.min() - pad, xs.max() + pad
+    ylo, yhi = ys.min() - pad, ys.max() + pad
+
+    # Fused-score surface over the logit grid (fusion applied to sigmoid scores)
+    gx = np.linspace(xlo, xhi, grid)
+    gy = np.linspace(ylo, yhi, grid)
+    X, Y = np.meshgrid(gx, gy)
+    SX, SY = _sigmoid(X), _sigmoid(Y)
+    if fusion == "min":
+        F = np.minimum(SX, SY)
+    elif fusion == "max":
+        F = np.maximum(SX, SY)
+    elif fusion == "mean":
+        F = 0.5 * (SX + SY)
+    else:
+        raise ValueError(f"Unknown fusion rule: {fusion}")
+
+    plt.figure(figsize=(8, 8))
+    # Background heatmap of the fused score (grayscale, as in the paper)
+    plt.imshow(F, origin="lower", extent=[xlo, xhi, ylo, yhi], cmap="Greys",
+               alpha=0.6, aspect="auto", vmin=0.0, vmax=1.0)
+    plt.colorbar(label=f"fused score  f = {fusion}(sigmoid(text), sigmoid(image))")
+    # Decision boundary at score-threshold (black solid line)
+    plt.contour(X, Y, F, levels=[threshold], colors="black", linewidths=2)
+
+    # Genuine / impostor / displaced-Fake logit points
+    plt.scatter(tc[real], ic[real], c="blue", marker="+", s=70, linewidths=1.5,
+                label="Real (genuine)")
+    plt.scatter(tc[fake], ic[fake], c="red", marker="o", s=40, alpha=0.9,
+                edgecolors="darkred", label="Fake (impostor)")
+    plt.scatter(tp[fake], ic[fake], c="green", marker="s", s=35, alpha=0.8,
+                label="Text-attacked")
+    plt.scatter(tc[fake], ip[fake], c="cyan", marker="^", s=45, alpha=0.8,
+                edgecolors="teal", label="Image-attacked")
+    plt.scatter(tp[fake], ip[fake], c="magenta", marker="D", s=35, alpha=0.8,
+                label="Both-attacked")
+
+    # Score-0.5 reference lines (logit = 0 on each axis)
+    plt.axvline(0, linestyle="--", color="gray", linewidth=1)
+    plt.axhline(0, linestyle="--", color="gray", linewidth=1)
+
+    plt.xlim(xlo, xhi)
+    plt.ylim(ylo, yhi)
+    plt.xlabel("Text-model logit")
+    plt.ylabel("Image-model logit")
+    plt.title(f"Logit space — {fusion} fusion (boundary at score={threshold})")
+    plt.legend(loc="lower left", framealpha=0.9)
+    plt.tight_layout()
+    plt.savefig(out_file, dpi=150)
+    plt.close()
+
+def plot_layer_logits_grid(y_true, text_layer_logits, image_layer_logits, out_file,
+                           source_label=0):
+    """One giant figure of per-layer text-vs-image logit scatters (Real vs Fake),
+    to inspect how class separation evolves across the model's transformer layers.
+
+    text_layer_logits / image_layer_logits: arrays of shape [N, num_layers].
+    """
+    y_true = np.asarray(y_true).reshape(-1)
+    T = np.asarray(text_layer_logits)   # [N, L]
+    I = np.asarray(image_layer_logits)  # [N, L]
+    n_layers = T.shape[1]
+
+    fake = y_true == source_label
+    real = ~fake
+
+    ncols = int(np.ceil(np.sqrt(n_layers)))
+    nrows = int(np.ceil(n_layers / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.2 * ncols, 3.2 * nrows),
+                             squeeze=False)
+
+    for layer in range(n_layers):
+        ax = axes[layer // ncols][layer % ncols]
+        ax.scatter(T[real, layer], I[real, layer], c="blue", marker="+",
+                   s=25, linewidths=0.8, alpha=0.7, label="Real")
+        ax.scatter(T[fake, layer], I[fake, layer], c="red", marker="o",
+                   s=18, alpha=0.7, edgecolors="darkred", label="Fake")
+        ax.axvline(0, linestyle="--", color="gray", linewidth=0.6)
+        ax.axhline(0, linestyle="--", color="gray", linewidth=0.6)
+        ax.set_title(f"Layer {layer}", fontsize=9)
+        ax.tick_params(labelsize=7)
+
+    # Hide any unused axes
+    for k in range(n_layers, nrows * ncols):
+        axes[k // ncols][k % ncols].axis("off")
+
+    fig.suptitle("Per-layer text vs image logit (head applied after each layer)", fontsize=14)
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower right", fontsize=11)
+    fig.supxlabel("Text-model logit")
+    fig.supylabel("Image-model logit")
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.savefig(out_file, dpi=130)
+    plt.close(fig)
+
+
+def plot_probe_curves(layers, curves, out_file, title="Per-layer linear-probe AUC (Real vs Fake)"):
+    """Line plot of per-layer linear-probe AUC vs depth.
+    curves: dict {label: array-of-AUC-per-layer}. A dashed chance line is added.
+    """
+    plt.figure(figsize=(9, 6))
+    for name, auc_vals in curves.items():
+        style = "--" if "control" in name.lower() else "-"
+        plt.plot(layers, auc_vals, marker="o", markersize=4, linestyle=style, label=name)
+    plt.axhline(0.5, linestyle=":", color="gray", linewidth=1, label="chance (0.5)")
+    plt.ylim(0.4, 1.02)
+    plt.xlabel("Transformer layer")
+    plt.ylabel("Probe test AUC (5-fold CV)")
+    plt.title(title)
+    plt.legend(loc="lower right")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_file, dpi=150)
+    plt.close()
+
+
 def plot_roc(rocs_info, out_file):
     plt.figure(figsize=(10, 10))
 
@@ -1017,11 +1177,20 @@ def regenerate_plot(roc_cache, roc_set):
         "cyan",
         "olive",
     ]
+    LINESTYLES = ["-", "--", "-.", ":"]
 
+    # Curves with identical AUC/ROC coincide exactly (e.g. clean vs image-perturbed
+    # under min/mean fusion). Vary linestyle + linewidth + alpha so a later curve
+    # drawn on top of an identical earlier one stays visible instead of hiding it.
+    n = len(roc_cache)
     for i, (name, data) in enumerate(roc_cache.items()):
         color = COLORS[i % len(COLORS)]
+        linestyle = LINESTYLES[i % len(LINESTYLES)]
+        linewidth = 4.0 - 2.0 * (i / max(n - 1, 1))  # earlier curves thicker, later thinner on top
 
-        plt.plot(data["fpr"], data["tpr"], color=color, linewidth=2, label=f"{name} (AUC={data['auc']:.3f})")
+        plt.plot(data["fpr"], data["tpr"], color=color, linestyle=linestyle,
+                 linewidth=linewidth, alpha=0.8,
+                 label=f"{name} (AUC={data['auc']:.3f})")
 
     plt.plot([0, 1], [0, 1], linestyle="--", color="black", label="Random")
 
