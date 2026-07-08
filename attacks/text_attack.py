@@ -7,7 +7,7 @@ import torchattacks
 import json
 import glob
 import argparse
-from transformers import BertTokenizer, BertForMaskedLM
+from transformers import AutoTokenizer, AutoModelForMaskedLM
 
 from torch.utils.data import DataLoader
 from PIL import Image
@@ -19,6 +19,7 @@ from utils import (
     use_model,
     img_perturbation,
     bertattack,
+    trepat_attack,
     load_available_datasets,
     save_predictions,
     save_perturbed_texts,
@@ -38,6 +39,7 @@ from configuration import (
 )
 from paths import RESULT_PATH, CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT
 import my_datasets
+from attack.rephraser import Rephraser
 
 # Main evaluation function
 def main():
@@ -82,9 +84,15 @@ def main():
     model, tokenizer, processor = load_model(device, args, args.model_path)
 
     # Load BERT model and tokenizer for text corruption
-    bertattack_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased", do_lower_case=True)
-    bertattack_mlm = BertForMaskedLM.from_pretrained("bert-base-uncased").to(device_mlm)
-    bertattack_mlm.eval()
+    # bertattack_tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-large-uncased", use_fast=True)
+    # bertattack_mlm = AutoModelForMaskedLM.from_pretrained("google-bert/bert-large-uncased").to(device_mlm)
+    # bertattack_mlm.eval()
+
+    trepat_rephraser = Rephraser(
+        model="HERMES7B",
+        device=device_mlm,
+        command="PARAPHRASE",
+    )
 
     # Select dataset class and load function dynamically
     dataset_class = dataset_classes[args.dataset]
@@ -137,7 +145,7 @@ def main():
             if label == args.source_label:
                 # Text perturbation
                 with torch.no_grad():
-                    news_txt_per, txt_similarity = bertattack(model, tokenizer, processor, args, news, label, device, bertattack_tokenizer, bertattack_mlm, device_mlm)
+                    news_txt_per, txt_similarity = trepat_attack(model, tokenizer, processor, args, news, label, device, trepat_rephraser)
                 torch.cuda.empty_cache()
 
                 # Ensure the text corruption is effective, if not use the original text as corrupted text

@@ -32,6 +32,8 @@ import my_datasets
 
 from themis_model import get_Themis
 from bertattack import attack, Feature
+from attack.rephraser import Rephraser
+from attack.modifier import Modifier
 from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
 
@@ -206,6 +208,99 @@ class BertAttackTextOnlyWrapper(torch.nn.Module):
         logits = torch.cat((1 - outputs, outputs), dim=1)
         return (logits,)
 
+class TargetedTrepatAttacker:
+    def __init__(self, modifier, source_label, target_label):
+        self.modifier = modifier
+        self.source_label = source_label
+        self.target_label = target_label
+
+    def attack(self, victim, input_text):
+        pred_old = victim.get_pred([input_text])[0]
+
+        # Attacca solo se il testo parte dalla classe sorgente.
+        if pred_old != self.source_label:
+            return None
+
+        old_target_prob = victim.get_prob([input_text])[0, self.target_label]
+
+        self.modifier.init(input_text)
+
+        while True:
+            x_new = self.modifier.get_next_variant()
+            if x_new is None:
+                break
+
+            probs = victim.get_prob([x_new])[0]
+            target_prob = probs[self.target_label]
+
+            # Feedback: più aumenta la prob. target, meglio è.
+            gain = target_prob - old_target_prob
+            self.modifier.get_feedback(gain)
+
+            pred_new = victim.get_pred([x_new])[0]
+            if pred_new == self.target_label:
+                return x_new
+
+        return None
+
+class TrepatThemisVictim:
+    def __init__(
+        self,
+        themis_model,
+        themis_tokenizer,
+        processor,
+        fixed_image,
+        args,
+        device,
+    ):
+        self.model = themis_model
+        self.tokenizer = themis_tokenizer
+        self.processor = processor
+        self.fixed_image = fixed_image
+        self.args = args
+        self.device = device
+
+    def _scores_from_texts(self, texts):
+        tokenized = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding="max_length",
+            truncation=True,
+            return_attention_mask=False,
+            max_length=self.args.n_tokens,
+        ).to(self.device)
+
+        txts = {
+            "input_ids": tokenized.input_ids.unsqueeze(1)
+        }
+
+        with torch.no_grad():
+            scores, logits = self.model(None, txts)
+
+        scores = scores.detach().cpu().numpy().reshape(-1)
+
+        return scores
+
+    def get_prob(self, input_):
+        scores = self._scores_from_texts(input_)
+
+        # Assunzione coerente con il tuo codice:
+        # score = probabilità della classe 1
+        probs = np.stack(
+            [
+                1.0 - scores,  # prob classe 0
+                scores,        # prob classe 1
+            ],
+            axis=1,
+        )
+
+        return probs
+
+    def get_pred(self, input_):
+        scores = self._scores_from_texts(input_)
+        preds = (scores > self.args.threshold).astype(int)
+
+        return preds
 def use_model(model, tokenizer, processor, args, news, thr, modality=None):
     device = next(model.parameters()).device
     # Text tokenization
@@ -327,6 +422,54 @@ def bertattack(
 
     cleanup_cuda(tgt_model, attacked_feat, feat, emb_original, emb_corr)
     
+    return corr_news, txt_similarity
+
+def trepat_attack(
+    model,
+    themis_tokenizer,
+    processor,
+    args,
+    news,
+    label,
+    device,
+    rephraser,
+):
+    victim = TrepatThemisVictim(
+        themis_model=model,
+        themis_tokenizer=themis_tokenizer,
+        processor=processor,
+        fixed_image=news["img"],
+        args=args,
+        device=device,
+    )
+
+    modifier = Modifier(
+        rephraser=rephraser,
+        splitter="cascade",
+        weak=False,
+    )
+
+    attacker = TargetedTrepatAttacker(
+        modifier=modifier,
+        source_label=args.source_label,
+        target_label=args.target_label,
+    )
+
+    corr_txt = attacker.attack(victim, news["txt"])
+
+    if corr_txt is None:
+        corr_txt = news["txt"]
+
+    corr_news = {
+        "txt": corr_txt,
+        "img": news["img"],
+    }
+
+    with torch.no_grad():
+        emb_original = model_sbert.encode(news["txt"], convert_to_tensor=True, device="cpu")
+        emb_corr = model_sbert.encode(corr_txt, convert_to_tensor=True, device="cpu")
+        txt_similarity = util.cos_sim(emb_original, emb_corr).item()
+
     return corr_news, txt_similarity
 
 def bertattack_text_only(
@@ -973,8 +1116,7 @@ def build_curve_name(args):
             name += f"-{args.mode}"
         if args.perturbation_type is not None:
             name += f"|{args.perturbation_type}"
-        else:
-            name += f"|{args.type}"
+    name += f"|{args.type}"
     return name
 
 def update_roc_cache( roc_set, curve_name, auc, fpr, tpr):
