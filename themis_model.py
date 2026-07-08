@@ -115,8 +115,51 @@ class Themis(nn.Module):
         logits = self.lm_head(x)
         #logits *= -1
         scores = torch.sigmoid(logits)
-        
+
         return scores, logits
+
+    def per_layer_features(self, images=None, texts=None):
+        """Mean-pooled hidden state AFTER each transformer layer, shape
+        [batch, num_layers, hidden]. Mirrors forward() up to the layer loop;
+        used as the input to per-layer linear probes. forward() is untouched.
+        """
+        if images is not None:
+            if isinstance(images, torch.Tensor):
+                images = {"pixel_values": images}
+            if len(images["pixel_values"].shape) == 4:
+                images["pixel_values"] = images["pixel_values"].unsqueeze(1)
+            b, k, c, h, w = images["pixel_values"].shape
+            images["pixel_values"] = images["pixel_values"].reshape(b * k, c, h, w)
+            image_features = self.img_embed_model(**images).last_hidden_state
+            image_features = self.image_proj(image_features)
+
+        if texts is not None:
+            text_embeds = self.emb(texts["input_ids"])
+            text_embeds = text_embeds.view(text_embeds.shape[0], text_embeds.shape[-2], text_embeds.shape[-1])
+
+        if images is not None and texts is not None:
+            x = torch.cat((image_features, text_embeds), dim=1)
+            if self.merge_tokens is not None:
+                x = self.patch_merger(x)
+        elif images is not None:
+            x = image_features
+        elif texts is not None:
+            x = text_embeds
+        else:
+            raise ValueError("At least one of images or texts must be not None")
+
+        feats = []
+        for i in range(len(self.h)):
+            x = self.h[i](x)[0]
+            feats.append(x.mean(dim=1))
+        return torch.stack(feats, dim=1)  # [batch, num_layers, hidden]
+
+    def per_layer_logits(self, images=None, texts=None):
+        """Final classification head applied to each layer's pooled hidden state
+        (a 'logit lens'), shape [batch, num_layers]."""
+        feats = self.per_layer_features(images=images, texts=texts)  # [B, L, H]
+        B, L, H = feats.shape
+        return self.lm_head(feats.reshape(B * L, H)).reshape(B, L)
 
 
 def get_Themis(
