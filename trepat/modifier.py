@@ -25,7 +25,7 @@ MIN_CHUNK_OR_SENTENCE_LENGTH = 60
 
 
 class Modifier:
-    def __init__(self, rephraser, splitter="sentences", weak=False):
+    def __init__(self, rephraser, splitter="sentences", weak=False, max_variants=MAX_VARIANTS):
         self.rephraser = rephraser
         self.lambo = Lambo.get('English')
         self.original_text = None
@@ -33,6 +33,7 @@ class Modifier:
         self.tested_variants = []
         self.untested_variants = []
         self.current_variant = None
+        self.max_variants = max_variants
         self.changes = []
         self.variant_counter = 0
         self.default_splitter = splitter
@@ -281,7 +282,7 @@ class Modifier:
         return result
     
     def get_next_variant(self):
-        if self.variant_counter > MAX_VARIANTS:
+        if self.variant_counter > self.max_variants:
             # print("Max variants reached, failing. ")
             return None
         else:

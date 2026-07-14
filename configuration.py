@@ -17,7 +17,7 @@ N_TOKENS = 1024
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = None
+SUBSET_SIZE = 28
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
@@ -27,7 +27,8 @@ PGD_ITERS = 25
 EPSILON = 255 / 255
 ALPHA_FACTOR = 2.0
 ## TrePat attack parameters
-ATTACK_MODEL = "HERMES7B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B", "YI34B", "MISTRAL7B", "HERMES7B"
+ATTACK_MODEL = "LLAMA8B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B", "YI34B", "MISTRAL7B", "HERMES7B"
+TREPAT_MAX_VARIANTS = 1000 # Attack budget: max rephrase-variants tried before giving up on a sample
 ## Bert-Attack attack parameters
 K_BERT_ATTACK = 100 # Number of candidates to consider for each word in the attack
 THRESHOLD_PRED_SCORE = 0

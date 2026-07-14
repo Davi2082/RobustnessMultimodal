@@ -10,7 +10,6 @@ import ollama
 import json
 import glob
 import gc
-import importlib
 
 from torch.utils.data import DataLoader
 from PIL import Image
@@ -34,11 +33,9 @@ import my_datasets
 from themis_model import get_Themis
 from trepat.rephraser import Rephraser
 from trepat.modifier import Modifier
-from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE
+from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE, TREPAT_MAX_VARIANTS
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
-
-# BERT-Attack dynamic import
-bert_attack = importlib.import_module("BERT-Attack")
+import bertattack as bert_attack
 
 # Utilities for logging
 def info(msg):
@@ -447,7 +444,7 @@ class TrepatThemisVictim:
 
 def trepat_attack(model, themis_tokenizer, processor, args, news, label, device, rephraser):
     victim = TrepatThemisVictim(model, themis_tokenizer, processor, args, device, image=news["img"])
-    modifier = Modifier(rephraser, splitter="cascade", weak=False)
+    modifier = Modifier(rephraser, splitter="cascade", weak=False, max_variants=TREPAT_MAX_VARIANTS)
     attacker = TargetedTrepatAttacker(modifier, args.source_label, args.target_label)
 
     corr_txt = attacker.attack(victim, news["txt"])
