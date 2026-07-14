@@ -1,3 +1,12 @@
+import torch
+
+# lambo calls torch.serialization.add_safe_globals(), which only exists on
+# torch>=2.4. This repo is pinned to torch 2.1.2, where torch.load() had no
+# allowlist mechanism and unpickled unconditionally, so a no-op shim here
+# preserves that behavior instead of crashing on import.
+if not hasattr(torch.serialization, "add_safe_globals"):
+    torch.serialization.add_safe_globals = lambda *args, **kwargs: None
+
 from lambo.segmenter.lambo import Lambo
 import numpy as np
 import random

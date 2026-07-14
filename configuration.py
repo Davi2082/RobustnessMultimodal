@@ -7,9 +7,9 @@ FF_WEIGHTS_PATH = "model/clip-vit-base-patch32_None_8_8_0.4_True10_best.pt"
 FF_NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
 
 # CUDA devices
-DEVICE = "cuda:0"      # main model (eval + attacks)
-DEVICE_EVAL = "cuda:0" # clean eval
-DEVICE_MLM = "cuda:0"  # BERT MLM (text/multimodal attacks only)
+DEVICE = "cuda:1"      # main model (eval + attacks)
+DEVICE_EVAL = "cuda:1" # clean eval
+DEVICE_MLM = "cuda:1"  # BERT MLM (text/multimodal attacks only)
 
 # Model parameters
 BATCH_SIZE = 128
@@ -17,9 +17,10 @@ N_TOKENS = 512
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = None
+SUBSET_SIZE = 1
 
 # Attack parameters
+ATTACK_MODEL = "HERMES7B"
 SOURCE_LABEL = 0 # Fake
 TARGET_LABEL = 1 # Real
 ## Image attack parameters

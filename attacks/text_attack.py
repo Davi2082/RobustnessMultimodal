@@ -25,6 +25,7 @@ from utils import (
     save_perturbed_texts,
 )
 from configuration import (
+    ATTACK_MODEL,
     SOURCE_LABEL,
     TARGET_LABEL,
     K_BERT_ATTACK,
@@ -89,7 +90,7 @@ def main():
     # bertattack_mlm.eval()
 
     trepat_rephraser = Rephraser(
-        model="HERMES7B",
+        model=ATTACK_MODEL,
         device=device_mlm,
         command="PARAPHRASE",
     )

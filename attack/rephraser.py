@@ -1,7 +1,11 @@
+import os
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch, re
 
-access_token = 'YOUR_HUGGINGFACE_TOKEN_HERE'
+# access_token = 'YOUR_HUGGINGFACE_TOKEN_HERE'
+# access_token = os.environ.get("HF_TOKEN")
+
 RESPONSES_EXPECTED = 5
 RE_MULTIPLE_NEWLINES = re.compile(r"\n+")
 
@@ -19,9 +23,10 @@ class Rephraser:
     def __init__(self, model, device, command):
         pretrained_model = models[model]
         self.device = device
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model, token=access_token)
-        self.model = AutoModelForCausalLM.from_pretrained(pretrained_model, torch_dtype=torch.bfloat16,
-                                                          token=access_token)
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
+                                                    #    token=access_token)
+        self.model = AutoModelForCausalLM.from_pretrained(pretrained_model, torch_dtype=torch.bfloat16)
+                                                        #   token=access_token)
         self.command = command
         self.model.to(device)
     

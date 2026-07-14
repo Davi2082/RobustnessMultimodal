@@ -106,8 +106,9 @@ class Themis(nn.Module):
             raise ValueError("At least one of images or texts must be not None")
 
         #pass through the module list h
+        position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)
         for i in range(len(self.h)):
-            x = self.h[i](x)[0]
+            x = self.h[i](x, position_ids=position_ids)[0]
         x = x.mean(dim=1)
         
         #print(x.shape)
@@ -149,8 +150,9 @@ class Themis(nn.Module):
             raise ValueError("At least one of images or texts must be not None")
 
         feats = []
+        position_ids = torch.arange(x.shape[1], device=x.device).unsqueeze(0).expand(x.shape[0], -1)
         for i in range(len(self.h)):
-            x = self.h[i](x)[0]
+            x = self.h[i](x, position_ids=position_ids)[0]
             feats.append(x.mean(dim=1))
         return torch.stack(feats, dim=1)  # [batch, num_layers, hidden]
 

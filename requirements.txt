@@ -3,8 +3,9 @@ einops==0.7.0
 pandas==2.3.3
 peft==0.7.1
 tqdm==4.65.0
-transformers==4.36.2
-urllib3==1.25.3
+# transformers==4.36.2
+transformers==4.44.2
+urllib3
 Pillow==10.2.0
 scikit-learn==1.7.2
 matplotlib
@@ -13,3 +14,7 @@ tabulate
 torchattacks
 torchmetrics
 sentence_transformers
+git+https://gitlab.clarin-pl.eu/syntactic-tools/lambo.git
+OpenAttack
+sentencepiece
+protobuf
