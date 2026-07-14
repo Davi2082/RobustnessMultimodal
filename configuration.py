@@ -7,32 +7,33 @@ FF_WEIGHTS_PATH = "model/clip-vit-base-patch32_None_8_8_0.4_True10_best.pt"
 FF_NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
 
 # CUDA devices
-DEVICE = "cuda:1"      # main model (eval + attacks)
-DEVICE_EVAL = "cuda:1" # clean eval
-DEVICE_MLM = "cuda:1"  # BERT MLM (text/multimodal attacks only)
+DEVICE = "cuda:0"      # main model (eval + attacks)
+DEVICE_EVAL = "cuda:0" # clean eval
+DEVICE_MLM = "cuda:0"  # BERT MLM (text/multimodal attacks only)
 
 # Model parameters
 BATCH_SIZE = 128
-N_TOKENS = 512
+N_TOKENS = 1024
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = 1
+SUBSET_SIZE = None
 
 # Attack parameters
-ATTACK_MODEL = "HERMES7B"
 SOURCE_LABEL = 0 # Fake
 TARGET_LABEL = 1 # Real
 ## Image attack parameters
 PGD_ITERS = 25
 EPSILON = 255 / 255
 ALPHA_FACTOR = 2.0
-## Textual attack parameters
+## TrePat attack parameters
+ATTACK_MODEL = "HERMES7B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B", "YI34B", "MISTRAL7B", "HERMES7B"
+## Bert-Attack attack parameters
 K_BERT_ATTACK = 100 # Number of candidates to consider for each word in the attack
 THRESHOLD_PRED_SCORE = 0
-MAX_WORDS_TO_ATTACK = 512
-MAX_CANDIDATES_PER_WORD = 32 # Maximum number of candidates to consider for each word in the attack
-MAX_WORDS_FOR_IMPORTANCE = 512
+MAX_WORDS_TO_ATTACK = 1024
+MAX_CANDIDATES_PER_WORD = 64 # Maximum number of candidates to consider for each word in the attack
+MAX_WORDS_FOR_IMPORTANCE = 1024
 MAX_CHANGE_RATIO = 1.0 # Max fraction of words BERTAttack may substitute before giving up (default 0.4)
 MIN_TXT_SIMILARITY = 0.0 # Post-hoc USE semantic similarity floor; revert to original if below
 USE_BPE = 1 # 1 = also attack multi-subword words (native BPE reconstruction); 0 = single-token words only

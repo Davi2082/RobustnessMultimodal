@@ -10,6 +10,7 @@ import ollama
 import json
 import glob
 import gc
+import importlib
 
 from torch.utils.data import DataLoader
 from PIL import Image
@@ -31,11 +32,13 @@ from tqdm import tqdm
 import my_datasets
 
 from themis_model import get_Themis
-from bertattack import attack, Feature
-from attack.rephraser import Rephraser
-from attack.modifier import Modifier
+from trepat.rephraser import Rephraser
+from trepat.modifier import Modifier
 from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
+
+# BERT-Attack dynamic import
+bert_attack = importlib.import_module("BERT-Attack")
 
 # Utilities for logging
 def info(msg):
@@ -208,99 +211,6 @@ class BertAttackTextOnlyWrapper(torch.nn.Module):
         logits = torch.cat((1 - outputs, outputs), dim=1)
         return (logits,)
 
-class TargetedTrepatAttacker:
-    def __init__(self, modifier, source_label, target_label):
-        self.modifier = modifier
-        self.source_label = source_label
-        self.target_label = target_label
-
-    def attack(self, victim, input_text):
-        pred_old = victim.get_pred([input_text])[0]
-
-        # Attacca solo se il testo parte dalla classe sorgente.
-        if pred_old != self.source_label:
-            return None
-
-        old_target_prob = victim.get_prob([input_text])[0, self.target_label]
-
-        self.modifier.init(input_text)
-
-        while True:
-            x_new = self.modifier.get_next_variant()
-            if x_new is None:
-                break
-
-            probs = victim.get_prob([x_new])[0]
-            target_prob = probs[self.target_label]
-
-            # Feedback: più aumenta la prob. target, meglio è.
-            gain = target_prob - old_target_prob
-            self.modifier.get_feedback(gain)
-
-            pred_new = victim.get_pred([x_new])[0]
-            if pred_new == self.target_label:
-                return x_new
-
-        return None
-
-class TrepatThemisVictim:
-    def __init__(
-        self,
-        themis_model,
-        themis_tokenizer,
-        processor,
-        fixed_image,
-        args,
-        device,
-    ):
-        self.model = themis_model
-        self.tokenizer = themis_tokenizer
-        self.processor = processor
-        self.fixed_image = fixed_image
-        self.args = args
-        self.device = device
-
-    def _scores_from_texts(self, texts):
-        tokenized = self.tokenizer(
-            texts,
-            return_tensors="pt",
-            padding="max_length",
-            truncation=True,
-            return_attention_mask=False,
-            max_length=self.args.n_tokens,
-        ).to(self.device)
-
-        txts = {
-            "input_ids": tokenized.input_ids.unsqueeze(1)
-        }
-
-        with torch.no_grad():
-            scores, logits = self.model(None, txts)
-
-        scores = scores.detach().cpu().numpy().reshape(-1)
-
-        return scores
-
-    def get_prob(self, input_):
-        scores = self._scores_from_texts(input_)
-
-        # Assunzione coerente con il tuo codice:
-        # score = probabilità della classe 1
-        probs = np.stack(
-            [
-                1.0 - scores,  # prob classe 0
-                scores,        # prob classe 1
-            ],
-            axis=1,
-        )
-
-        return probs
-
-    def get_pred(self, input_):
-        scores = self._scores_from_texts(input_)
-        preds = (scores > self.args.threshold).astype(int)
-
-        return preds
 def use_model(model, tokenizer, processor, args, news, thr, modality=None):
     device = next(model.parameters()).device
     # Text tokenization
@@ -395,7 +305,7 @@ def bertattack(
         bert_tokenizer=bert_tokenizer,
     )
 
-    attacked_feat = attack(
+    attacked_feat = bert_attack.attack(
         feature=feat,
         tgt_model=tgt_model,
         mlm_model=mlm_model,
@@ -425,36 +335,120 @@ def bertattack(
     
     return corr_news, txt_similarity
 
-def trepat_attack(
-    model,
-    themis_tokenizer,
-    processor,
-    args,
-    news,
-    label,
-    device,
-    rephraser,
-):
-    victim = TrepatThemisVictim(
-        themis_model=model,
-        themis_tokenizer=themis_tokenizer,
-        processor=processor,
-        fixed_image=news["img"],
-        args=args,
-        device=device,
-    )
+class TargetedTrepatAttacker:
+    def __init__(self, modifier, source_label, target_label):
+        self.modifier = modifier
+        self.source_label = source_label
+        self.target_label = target_label
 
-    modifier = Modifier(
-        rephraser=rephraser,
-        splitter="cascade",
-        weak=False,
-    )
+    def attack(self, victim, input_text):
+        pred_old = victim.get_pred([input_text])[0]
 
-    attacker = TargetedTrepatAttacker(
-        modifier=modifier,
-        source_label=args.source_label,
-        target_label=args.target_label,
-    )
+        # Attacca solo se il testo parte dalla classe sorgente.
+        if pred_old != self.source_label:
+            return None
+
+        old_target_prob = victim.get_prob([input_text])[0, self.target_label]
+
+        self.modifier.init(input_text)
+
+        while True:
+            x_new = self.modifier.get_next_variant()
+            if x_new is None:
+                break
+
+            probs = victim.get_prob([x_new])[0]
+            target_prob = probs[self.target_label]
+
+            # Feedback: più aumenta la prob. target, meglio è.
+            gain = target_prob - old_target_prob
+            self.modifier.get_feedback(gain)
+
+            pred_new = victim.get_pred([x_new])[0]
+            if pred_new == self.target_label:
+                return x_new
+
+        return None
+
+class TrepatThemisVictim:
+    def __init__(self, model, tokenizer, processor, args, device, image=None):
+        self.model = model
+        self.tokenizer = tokenizer
+        self.processor = processor
+        self.args = args
+        self.device = device
+        self.image = image
+        self._prob_cache = {}
+
+    def _use_image(self):
+            return self.args.modality in ["feature-fusion", "intermediate-fusion"]
+    def _build_text_input(self, texts):
+        tokenized = self.tokenizer(texts, return_tensors="pt", padding="max_length", truncation=True, return_attention_mask=False, max_length=self.args.n_tokens,).to(self.device)
+        return {"input_ids": tokenized.input_ids.unsqueeze(1)}
+
+    def _build_image_input(self, batch_size):
+        if not self._use_image():
+            return None
+
+        if self.image is None:
+            return None
+
+        # If the image is alread a tensor, we assume it's already processed and just move it to the correct device
+        if torch.is_tensor(self.image):
+            img = self.image.to(self.device)
+
+            # [C, H, W] -> [1, C, H, W]
+            if img.dim() == 3:
+                img = img.unsqueeze(0)
+
+            # [1, C, H, W] -> [batch_size, C, H, W]
+            if img.shape[0] == 1 and batch_size > 1:
+                img = img.repeat(batch_size, 1, 1, 1)
+
+            return img
+
+        # If the image is a PIL image, we process it using the processor
+        processed = self.processor(images=[self.image] * batch_size, return_tensors="pt", do_normalize=False)
+
+        return processed["pixel_values"].to(self.device)
+
+    def _scores_from_texts(self, texts):
+        txt_input = self._build_text_input(texts)
+        img_input = self._build_image_input(batch_size=len(texts))
+
+        with torch.no_grad():
+            scores, logits = self.model(img_input, txt_input)
+
+        return scores.detach().cpu().numpy().reshape(-1)
+
+    def get_prob(self, input_):
+        missing_texts = [
+            text for text in input_
+            if text not in self._prob_cache
+        ]
+
+        if missing_texts:
+            scores = self._scores_from_texts(missing_texts)
+
+            for text, score in zip(missing_texts, scores):
+                self._prob_cache[text] = np.array(
+                    [1.0 - score, score],
+                    dtype=np.float32,
+                )
+
+        return np.stack(
+            [self._prob_cache[text] for text in input_],
+            axis=0,
+        )
+
+    def get_pred(self, input_):
+        probs = self.get_prob(input_)
+        return (probs[:, 1] > self.args.threshold).astype(int)
+
+def trepat_attack(model, themis_tokenizer, processor, args, news, label, device, rephraser):
+    victim = TrepatThemisVictim(model, themis_tokenizer, processor, args, device, image=news["img"])
+    modifier = Modifier(rephraser, splitter="cascade", weak=False)
+    attacker = TargetedTrepatAttacker(modifier, args.source_label, args.target_label)
 
     corr_txt = attacker.attack(victim, news["txt"])
 
@@ -544,7 +538,7 @@ def bertattack_text_only_single(
     mlm_device,
     use_bpe=0,
 ):
-    feat = Feature(txt, int(label))
+    feat = bert_attack.Feature(txt, int(label))
 
     tgt_model = BertAttackTextOnlyWrapper(
         text_model=model,

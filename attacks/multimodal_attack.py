@@ -96,6 +96,13 @@ def main():
     bertattack_mlm = BertForMaskedLM.from_pretrained("bert-base-uncased").to(device_mlm)
     bertattack_mlm.eval()
 
+    # Load Rephraser model for text corruption
+    trepat_rephraser = Rephraser(
+        model="GEMMA9B",
+        device=device_mlm,
+        command="PARAPHRASE",
+    )
+
     # Select dataset class and load function dynamically
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
@@ -165,7 +172,7 @@ def main():
 
                     # Text perturbation on the current version of the sample
                     with torch.no_grad():
-                        news_txt_per, txt_similarity = bertattack(model, tokenizer, processor, args, news_per, label, device, bertattack_tokenizer, bertattack_mlm, device_mlm)
+                        news_txt_per, txt_similarity = trepat_attack(model, tokenizer, processor, args, news_per, label, device, trepat_rephraser)
                     torch.cuda.empty_cache()
 
                     # Only keep the text perturbation if it stays semantically similar enough

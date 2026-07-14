@@ -40,15 +40,19 @@ from configuration import (
 )
 from paths import RESULT_PATH, CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT
 import my_datasets
-from attack.rephraser import Rephraser
+from trepat.rephraser import Rephraser
 
 # Main evaluation function
 def main():
     dataset_classes, load_functions = load_available_datasets()        
     # "Parameters" contains information about the model that would be attacked
     parameters_path = CLEAN_TEXT_PARAMS
-    with open(parameters_path, 'r', encoding='utf-8') as f:
-        parameters = json.load(f)
+    try:
+        with open(parameters_path, 'r', encoding='utf-8') as f:
+            parameters = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print("Clean results are not available. Please run the clean evaluation first with the command: python eval.py --modality text")
+        sys.exit(1)
 
     # Here there are the attack parameters
     parser = argparse.ArgumentParser()

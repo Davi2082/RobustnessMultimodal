@@ -26,8 +26,8 @@ if __name__ == "__main__":
 
     # 2. Adversarial attacks
     run([PYTHON, "attacks/image_attack.py"],      "image_attack.log",     "Image attack     (PGD)")
-    run([PYTHON, "attacks/text_attack.py"],       "text_attack.log",      "Text attack      (BERTAttack)")
-    run([PYTHON, "attacks/multimodal_attack.py"], "multimodal_attack.log","Multimodal attack (PGD + BERTAttack)")
+    run([PYTHON, "attacks/text_attack.py"],       "text_attack.log",      "Text attack      (TrePat)")
+    run([PYTHON, "attacks/multimodal_attack.py"], "multimodal_attack.log","Multimodal attack (PGD + TrePat)")
 
     # 3. Late-fusion aggregation (clean + perturbed)
     run([PYTHON, "late_fusion_perturbation.py"], "late_fusion.log", "Late-fusion aggregation")

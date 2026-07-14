@@ -47,11 +47,11 @@ class Modifier:
         self.reset(text)
     
     def reset(self, text):
-        print("Resetting modifier with text: " + text)
+        # print("Resetting modifier with text: " + text)
         self.original_text = text
-        print("Getting the initial changes...")
+        # print("Getting the initial changes...")
         self.changes = self.get_changes_everywhere(self.original_text)
-        print("Found " + str(len(self.changes)))
+        # print("Found " + str(len(self.changes)))
         self.best_variants = []
         self.tested_variants = []
         self.untested_variants = self.explore_initial_variants(self.original_text, self.changes)
@@ -174,10 +174,10 @@ class Modifier:
         return result
     
     def get_changes_in_fragment(self, text):
-        print("Running fragment rephraser...")
+        # print("Running fragment rephraser...")
         rephrasings = self.rephraser.rephrase(text)
         all_changes = set()
-        print("Collecting changes...")
+        # print("Collecting changes...")
         for rephrasing in rephrasings:
             if self.weak:
                 all_changes.add(((0, len(text)), text, rephrasing))
@@ -267,7 +267,7 @@ class Modifier:
         return all_changes
     
     def explore_initial_variants(self, text, changes):
-        print("Exploring the possible variants...")
+        # print("Exploring the possible variants...")
         result = []
         for change in changes:
             variant = Variant(text)
@@ -276,26 +276,26 @@ class Modifier:
                 continue
             result.append(variant)
             self.generated_variants.add(variant.current_text)
-        print("Found " + str(len(result)) + " variants, sorting.")
+        # print("Found " + str(len(result)) + " variants, sorting.")
         result = self.sort_variants(result)
         return result
     
     def get_next_variant(self):
         if self.variant_counter > MAX_VARIANTS:
-            print("Max variants reached, failing. ")
+            # print("Max variants reached, failing. ")
             return None
         else:
             self.variant_counter += 1
         
         if len(self.untested_variants) > 0:
-            print(str(self.variant_counter) + " Asked for a variant, providing: ")
+            # print(str(self.variant_counter) + " Asked for a variant, providing: ")
             self.current_variant = self.untested_variants[0]
             self.untested_variants = self.untested_variants[1:]
-            print("--> " + self.current_variant.current_text)
+            # print("--> " + self.current_variant.current_text)
             return self.current_variant.current_text
         else:
-            print(
-                str(self.variant_counter) + " Asked for a variant, but nothing left. Sorting tested variants and selecting the best.")
+            # print(
+            #    str(self.variant_counter) + " Asked for a variant, but nothing left. Sorting tested variants and selecting the best.")
             self.tested_variants = sorted(self.tested_variants, key=lambda variant: - variant.value)
             self.best_variants = self.tested_variants[:5]
             for variant in self.best_variants:
@@ -309,15 +309,15 @@ class Modifier:
                         self.generated_variants.add(new_variant.current_text)
             if len(self.untested_variants) > 0:
                 self.untested_variants = self.sort_variants(self.untested_variants)
-                print("Obtained " + str(len(self.untested_variants)))
+                # print("Obtained " + str(len(self.untested_variants)))
                 self.current_variant = self.untested_variants[0]
                 self.untested_variants = self.untested_variants[1:]
-                print("--> " + self.current_variant.current_text)
+                # print("--> " + self.current_variant.current_text)
                 return self.current_variant.current_text
             else:
-                print("Nothing useful found, resetting with best variant.")
+                # print("Nothing useful found, resetting with best variant.")
                 if len(self.best_variants) == 0:
-                    print("Failed.")
+                    # print("Failed.")
                     return None
                 else:
                     self.reset(self.best_variants[0].current_text)
@@ -333,9 +333,9 @@ class Modifier:
     
     def get_feedback(self, value):
         if self.weak:
-            print("Weak mode, generating random feedback.")
+            # print("Weak mode, generating random feedback.")
             value = random.random()
-        print("Obtained feedback of " + str(value) + ", saving.")
+        # print("Obtained feedback of " + str(value) + ", saving.")
         self.current_variant.get_feedback(value)
         self.tested_variants.append(self.current_variant)
         self.current_variant = None
