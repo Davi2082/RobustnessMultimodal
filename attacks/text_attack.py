@@ -26,6 +26,7 @@ from utils import (
 )
 from configuration import (
     ATTACK_MODEL,
+    COMMAND,
     SOURCE_LABEL,
     TARGET_LABEL,
     K_BERT_ATTACK,
@@ -96,7 +97,7 @@ def main():
     trepat_rephraser = Rephraser(
         model=ATTACK_MODEL,
         device=device_mlm,
-        command="PARAPHRASE",
+        command=COMMAND,
     )
 
     # Select dataset class and load function dynamically

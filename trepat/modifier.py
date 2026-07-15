@@ -8,6 +8,7 @@ if not hasattr(torch.serialization, "add_safe_globals"):
     torch.serialization.add_safe_globals = lambda *args, **kwargs: None
 
 from lambo.segmenter.lambo import Lambo
+from configuration import MAX_CHANGE_TOTAL, MAX_CHANGE_FRAGMENT, MAX_VARIANTS, MIN_CHUNK_OR_SENTENCE_LENGTH
 import numpy as np
 import random
 
@@ -16,16 +17,8 @@ DIRECTION_UP = 1
 DIRECTION_LEFT = 2
 DIRECTION_UPLEFT = 3
 
-MAX_CHANGE_TOTAL = 0.33
-MAX_CHANGE_FRAGMENT = 0.67
-
-MAX_VARIANTS = 1000
-
-MIN_CHUNK_OR_SENTENCE_LENGTH = 60
-
-
 class Modifier:
-    def __init__(self, rephraser, splitter="sentences", weak=False):
+    def __init__(self, rephraser, splitter="sentences", weak=False, max_variants=MAX_VARIANTS):
         self.rephraser = rephraser
         self.lambo = Lambo.get('English')
         self.original_text = None
@@ -33,6 +26,7 @@ class Modifier:
         self.tested_variants = []
         self.untested_variants = []
         self.current_variant = None
+        self.max_variants = max_variants
         self.changes = []
         self.variant_counter = 0
         self.default_splitter = splitter
@@ -281,7 +275,7 @@ class Modifier:
         return result
     
     def get_next_variant(self):
-        if self.variant_counter > MAX_VARIANTS:
+        if self.variant_counter > self.max_variants:
             # print("Max variants reached, failing. ")
             return None
         else:

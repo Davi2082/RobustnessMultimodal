@@ -3,30 +3,26 @@ import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch, re
 
-# access_token = 'YOUR_HUGGINGFACE_TOKEN_HERE'
+from configuration import RESPONSES_EXPECTED
+
+# access_token = ''
 # access_token = os.environ.get("HF_TOKEN")
 
-RESPONSES_EXPECTED = 5
 RE_MULTIPLE_NEWLINES = re.compile(r"\n+")
 
 models = {"OLDGEMMA": "google/gemma-1.1-2b-it", "LLAMA1B": "meta-llama/Llama-3.2-1B-Instruct",
           "LLAMA3B": "meta-llama/Llama-3.2-3B-Instruct",
           "LLAMA8B": "meta-llama/Llama-3.1-8B-Instruct", "GEMMA2B": "google/gemma-2-2b-it",
-          "GEMMA9B": "google/gemma-2-9b-it", "OLMO7B": "allenai/OLMo-7B-0724-Instruct-hf",
-          # Models without QwenTokenizer, so without upgrading transformer library
-          "YI34B": "01-ai/Yi-34B-Chat",
-          "MISTRAL7B": "mistralai/Mistral-7B-Instruct-v0.2",
-          "HERMES7B": "NousResearch/Nous-Hermes-2-Mistral-7B-DPO"}
+          "GEMMA9B": "google/gemma-2-9b-it", "OLMO7B": "allenai/OLMo-7B-0724-Instruct-hf"
+          }
 
 
 class Rephraser:
     def __init__(self, model, device, command):
         pretrained_model = models[model]
         self.device = device
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
-                                                    #    token=access_token)
-        self.model = AutoModelForCausalLM.from_pretrained(pretrained_model, torch_dtype=torch.bfloat16)
-                                                        #   token=access_token)
+        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model, token=access_token)
+        self.model = AutoModelForCausalLM.from_pretrained(pretrained_model, torch_dtype=torch.bfloat16, token=access_token)
         self.command = command
         self.model.to(device)
     
@@ -41,7 +37,7 @@ class Rephraser:
         prompt = commands[
                      command] + " You can add, remove or replace individual words or punctuation characters, but " + (
                      "try to " if command == "CHANGE" else "keep the changes to the minimum to ") + "preserve the original meaning. " + \
-                 "Return five different rephrasings, separated by newline. Do not generate any text except the reformulations.\nINPUT:\n" + input_text + "\nOUTPUT:\n"
+                 f"Return exactly {RESPONSES_EXPECTED} different rephrasings, separated by newline. Do not generate any text except the reformulations.\nINPUT:\n" + input_text + "\nOUTPUT:\n"
         return prompt
     
     @staticmethod
@@ -57,7 +53,8 @@ class Rephraser:
             'Rephrasing ') or response.startswith('Here are '))]
         responses = [response.lstrip('1234567890-').lstrip('.').lstrip() for response in responses]
         if len(responses) != RESPONSES_EXPECTED:
-            print("ERROR: Not received the expected number of responses after parsing the input.")
+            # print("ERROR: Not received the expected number of responses after parsing the input. Received " + str(len(responses)))
+            pass
         return responses
     
     def rephrase(self, input_text):

@@ -17,7 +17,7 @@ N_TOKENS = 1024
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = None
+SUBSET_SIZE = 2
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
@@ -27,7 +27,18 @@ PGD_ITERS = 25
 EPSILON = 255 / 255
 ALPHA_FACTOR = 2.0
 ## TrePat attack parameters
-ATTACK_MODEL = "HERMES7B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B", "YI34B", "MISTRAL7B", "HERMES7B"
+ATTACK_MODEL = "LLAMA8B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B"
+COMMAND = "PARAPHRASE" # options: "REPHRASE": "Rephrase the provided input text.", 
+                   # "PARAPHRASE": "Paraphrase the provided input text.", 
+                   # "SIMPLIFY": "Simplify the provided input text.", 
+                   # "FORMAL": "Rewrite the provided input text in a more formal style.", 
+                   # "INFORMAL": "Rewrite the provided input text in a less formal style.", 
+                   # "CHANGE": "Make changes to the provided input text."
+MAX_CHANGE_TOTAL = 1 # Maximum change size relative to the full text
+MAX_CHANGE_FRAGMENT = 1 # Maximum change size relative to the current fragment
+MAX_VARIANTS = 10000 # Maximum number of candidate variants evaluated
+MIN_CHUNK_OR_SENTENCE_LENGTH = 60 # Merge fragments shorter than MIN_CHUNK_OR_SENTENCE_LENGTH characters
+RESPONSES_EXPECTED = 10 # Number of paraphrases requested per fragment
 ## Bert-Attack attack parameters
 K_BERT_ATTACK = 100 # Number of candidates to consider for each word in the attack
 THRESHOLD_PRED_SCORE = 0

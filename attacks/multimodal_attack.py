@@ -1,4 +1,3 @@
-from pyexpat import model
 import sys
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
@@ -20,6 +19,7 @@ from utils import (
     use_model,
     img_perturbation,
     bertattack,
+    trepat_attack,
     load_available_datasets,
     save_predictions,
     save_perturbed_image,
@@ -32,6 +32,7 @@ from configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
+    ATTACK_MODEL,
     K_BERT_ATTACK,
     THRESHOLD_PRED_SCORE,
     MAX_WORDS_TO_ATTACK,
@@ -44,6 +45,7 @@ from configuration import (
 )
 from paths import RESULT_PATH, CLEAN_FF_PARAMS, DATA_PERTURBED_FF
 import my_datasets
+from trepat.rephraser import Rephraser
 
 # Main evaluation function
 def main():
@@ -98,7 +100,7 @@ def main():
 
     # Load Rephraser model for text corruption
     trepat_rephraser = Rephraser(
-        model="GEMMA9B",
+        model=ATTACK_MODEL,
         device=device_mlm,
         command="PARAPHRASE",
     )
