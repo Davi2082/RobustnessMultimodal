@@ -17,7 +17,11 @@ N_TOKENS = 1024
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
+<<<<<<< HEAD
 SUBSET_SIZE = 2
+=======
+SUBSET_SIZE = 28
+>>>>>>> refs/remotes/origin/main
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
