@@ -1,5 +1,3 @@
-import os
-
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch, re
 
@@ -25,7 +23,8 @@ class Rephraser:
         self.model = AutoModelForCausalLM.from_pretrained(pretrained_model, torch_dtype=torch.bfloat16, token=access_token)
         self.command = command
         self.model.to(device)
-    
+        self.model.eval()
+
     @staticmethod
     def prepare_prompt(input_text, command):
         commands = {"REPHRASE": "Rephrase the provided input text.",
@@ -60,12 +59,34 @@ class Rephraser:
     def rephrase(self, input_text):
         if len(input_text) < 5:
             return []
-        new_tokens = int(len(self.tokenizer(input_text)['input_ids']) * RESPONSES_EXPECTED * 1.2)
+
         prompt = self.prepare_prompt(input_text, self.command)
-        input_ids = self.tokenizer(prompt, return_tensors="pt")
-        input_ids = {key: input_ids[key].to(self.device) for key in input_ids}
-        outputs = self.model.generate(**input_ids, max_new_tokens=new_tokens)
-        outputs = outputs.to(torch.device("cpu"))
-        output_text = self.tokenizer.decode(outputs[0])
-        variants = self.unpack_answer(output_text, input_text)
+        messages = [{"role": "user", "content": prompt}]
+        chat_text = self.tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        encoding = self.tokenizer(chat_text, return_tensors="pt", add_special_tokens=False)
+        encoding = {key: value.to(self.device) for key, value in encoding.items()}
+        input_len = encoding["input_ids"].shape[1]
+
+        src_len = len(self.tokenizer(input_text)["input_ids"])
+        max_new_tokens = max(48, int(src_len * 2.5))
+
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **encoding,
+                max_new_tokens=max_new_tokens,
+                do_sample=True,
+                temperature=0.9,
+                top_p=0.92,
+                num_return_sequences=n,
+                pad_token_id=self.tokenizer.eos_token_id,
+            )
+
+        variants = []
+        for sequence in outputs:
+            generated = sequence[input_len:]
+            text = self.tokenizer.decode(generated, skip_special_tokens=True).strip().strip('"').strip()
+            if text and text.lower() != input_text.strip().lower():
+                variants.append(text)
         return variants

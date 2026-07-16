@@ -7,29 +7,25 @@ FF_WEIGHTS_PATH = "model/clip-vit-base-patch32_None_8_8_0.4_True10_best.pt"
 FF_NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
 
 # CUDA devices
-DEVICE = "cuda:0"      # main model (eval + attacks)
-DEVICE_EVAL = "cuda:0" # clean eval
-DEVICE_MLM = "cuda:0"  # BERT MLM (text/multimodal attacks only)
+DEVICE = "cuda:1"      # main model (eval + attacks)
+DEVICE_EVAL = "cuda:1" # clean eval
+DEVICE_MLM = "cuda:1"  # BERT MLM (text/multimodal attacks only)
 
 # Model parameters
 BATCH_SIZE = 128
-N_TOKENS = 1024
+N_TOKENS = 128
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-<<<<<<< HEAD
-SUBSET_SIZE = 2
-=======
-SUBSET_SIZE = 28
->>>>>>> refs/remotes/origin/main
+SUBSET_SIZE = None
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
 TARGET_LABEL = 1 # Real
 ## Image attack parameters
-PGD_ITERS = 25
-EPSILON = 255 / 255
-ALPHA_FACTOR = 2.0
+PGD_ITERS = 20
+EPSILON = 8 / 255
+ALPHA_FACTOR = 0.01
 ## TrePat attack parameters
 ATTACK_MODEL = "LLAMA8B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B"
 COMMAND = "PARAPHRASE" # options: "REPHRASE": "Rephrase the provided input text.", 

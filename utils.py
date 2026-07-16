@@ -442,11 +442,31 @@ class TrepatThemisVictim:
         probs = self.get_prob(input_)
         return (probs[:, 1] > self.args.threshold).astype(int)
 
+def visible_text_window(text, tokenizer, n_tokens):
+    """Prefix of `text` that survives the classifier's own truncation
+    (max_length=n_tokens), reconstructed via decode() so it reflects exactly
+    the token stream the model attends to -- tokenizer normalization (BPE
+    merges, whitespace/Unicode handling) can make an offset-mapping character
+    slice of the original string diverge from what decode() reconstructs.
+    Edits placed after this point are silently discarded by every downstream
+    tokenizer call, so the attacker should never spend budget rephrasing the
+    invisible tail."""
+    encoding = tokenizer(text, truncation=True, max_length=n_tokens, return_offsets_mapping=True)
+    visible_txt = tokenizer.decode(encoding["input_ids"], skip_special_tokens=True)
+    offsets = encoding["offset_mapping"]
+    end_char = max((end for _, end in offsets), default=0)
+    hidden_txt = text[end_char:]
+    return visible_txt, hidden_txt
+
 def trepat_attack(model, themis_tokenizer, processor, args, news, label, device, rephraser):
+    visible_txt, hidden_txt = visible_text_window(news["txt"], themis_tokenizer, args.n_tokens)
+    visible_news = {"txt": visible_txt, "img": news["img"]}
+
     victim = TrepatThemisVictim(model, themis_tokenizer, processor, args, device, image=news["img"])
     modifier = Modifier(rephraser, splitter="cascade", weak=False, max_variants=TREPAT_MAX_VARIANTS)
     attacker = TargetedTrepatAttacker(modifier, args.source_label, args.target_label)
 
+<<<<<<< HEAD
     # Extract exactly the portion of text visible to Themis
     themis_encoding = themis_tokenizer(news["txt"], truncation=True, max_length=args.n_tokens, add_special_tokens=True, padding=False)
     visible_text = themis_tokenizer.decode(themis_encoding["input_ids"], skip_special_tokens=True)
@@ -455,6 +475,14 @@ def trepat_attack(model, themis_tokenizer, processor, args, news, label, device,
 
     if corr_txt is None:
         corr_txt = visible_text
+=======
+    corr_visible = attacker.attack(victim, visible_news["txt"])
+
+    if corr_visible is None:
+        corr_visible = visible_news["txt"]
+
+    corr_txt = corr_visible + hidden_txt
+>>>>>>> dee8c85 (Reduce the tokenizer max token count to 128 to match the default value used in the themis model. Fix the number of tokens used by the TREPAT attacks to match it)
 
     corr_news = {
         "txt": corr_txt,
