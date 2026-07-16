@@ -33,7 +33,7 @@ import my_datasets
 from themis_model import get_Themis
 from trepat.rephraser import Rephraser
 from trepat.modifier import Modifier
-from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE, TREPAT_MAX_VARIANTS
+from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE, MAX_VARIANTS
 from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
 import bertattack as bert_attack
 
@@ -463,26 +463,15 @@ def trepat_attack(model, themis_tokenizer, processor, args, news, label, device,
     visible_news = {"txt": visible_txt, "img": news["img"]}
 
     victim = TrepatThemisVictim(model, themis_tokenizer, processor, args, device, image=news["img"])
-    modifier = Modifier(rephraser, splitter="cascade", weak=False, max_variants=TREPAT_MAX_VARIANTS)
+    modifier = Modifier(rephraser, splitter="cascade", weak=False, max_variants=MAX_VARIANTS)
     attacker = TargetedTrepatAttacker(modifier, args.source_label, args.target_label)
 
-<<<<<<< HEAD
-    # Extract exactly the portion of text visible to Themis
-    themis_encoding = themis_tokenizer(news["txt"], truncation=True, max_length=args.n_tokens, add_special_tokens=True, padding=False)
-    visible_text = themis_tokenizer.decode(themis_encoding["input_ids"], skip_special_tokens=True)
-
-    corr_txt = attacker.attack(victim, visible_text)
-
-    if corr_txt is None:
-        corr_txt = visible_text
-=======
     corr_visible = attacker.attack(victim, visible_news["txt"])
 
     if corr_visible is None:
         corr_visible = visible_news["txt"]
 
     corr_txt = corr_visible + hidden_txt
->>>>>>> dee8c85 (Reduce the tokenizer max token count to 128 to match the default value used in the themis model. Fix the number of tokens used by the TREPAT attacks to match it)
 
     corr_news = {
         "txt": corr_txt,
@@ -490,7 +479,7 @@ def trepat_attack(model, themis_tokenizer, processor, args, news, label, device,
     }
 
     with torch.no_grad():
-        emb_original = model_sbert.encode(visible_text, convert_to_tensor=True, device="cpu")
+        emb_original = model_sbert.encode(visible_news["txt"], convert_to_tensor=True, device="cpu")
         emb_corr = model_sbert.encode(corr_txt, convert_to_tensor=True, device="cpu")
         txt_similarity = util.cos_sim(emb_original, emb_corr).item()
 
