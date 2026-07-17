@@ -341,13 +341,15 @@ class TargetedTrepatAttacker:
     def attack(self, victim, input_text):
         pred_old = victim.get_pred([input_text])[0]
 
-        # Attacca solo se il testo parte dalla classe sorgente.
         if pred_old != self.source_label:
             return None
 
         old_target_prob = victim.get_prob([input_text])[0, self.target_label]
 
         self.modifier.init(input_text)
+
+        best_text = input_text
+        best_target_prob = old_target_prob
 
         while True:
             x_new = self.modifier.get_next_variant()
@@ -357,15 +359,18 @@ class TargetedTrepatAttacker:
             probs = victim.get_prob([x_new])[0]
             target_prob = probs[self.target_label]
 
-            # Feedback: più aumenta la prob. target, meglio è.
             gain = target_prob - old_target_prob
             self.modifier.get_feedback(gain)
+
+            if target_prob > best_target_prob:
+                best_target_prob = target_prob
+                best_text = x_new
 
             pred_new = victim.get_pred([x_new])[0]
             if pred_new == self.target_label:
                 return x_new
 
-        return None
+        return best_text
 
 class TrepatThemisVictim:
     def __init__(self, model, tokenizer, processor, args, device, image=None):
