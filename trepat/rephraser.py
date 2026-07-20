@@ -1,10 +1,9 @@
 from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch, re
+import torch, re, os
 
 from configuration import RESPONSES_EXPECTED
 
-# access_token = ''
-# access_token = os.environ.get("HF_TOKEN")
+access_token = os.environ.get("HF_TOKEN")
 
 RE_MULTIPLE_NEWLINES = re.compile(r"\n+")
 
@@ -79,7 +78,7 @@ class Rephraser:
                 do_sample=True,
                 temperature=0.9,
                 top_p=0.92,
-                num_return_sequences=n,
+                num_return_sequences=RESPONSES_EXPECTED,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
 

@@ -207,7 +207,7 @@ def get_bpe_substitues(substitutes, tokenizer, mlm_model):
     word_list = []
     # all_substitutes = all_substitutes[:24]
     all_substitutes = torch.tensor(all_substitutes) # [ N, L ]
-    all_substitutes = all_substitutes[:24].to('cuda')
+    all_substitutes = all_substitutes[:24].to(next(mlm_model.parameters()).device)
     # print(substitutes.size(), all_substitutes.size())
     N, L = all_substitutes.size()
     word_predictions = mlm_model(all_substitutes)[0] # N L vocab-size

@@ -18,7 +18,7 @@ from utils import (
     load_model,
     use_model,
     img_perturbation,
-    bertattack,
+    bertattack as bertattack_attack,
     trepat_attack,
     load_available_datasets,
     save_predictions,
@@ -80,6 +80,7 @@ def main():
     parser.add_argument("--max_candidates_per_word", type=int, default=MAX_CANDIDATES_PER_WORD)
     parser.add_argument("--max_words_for_importance", type=int, default=MAX_WORDS_FOR_IMPORTANCE)
     parser.add_argument("--min_txt_similarity", type=float, default=MIN_TXT_SIMILARITY)
+    parser.add_argument("--attack_method", type=str, default="trepat", choices=["trepat", "bertattack"])
     args = parser.parse_args()
 
     # Device setting
@@ -89,23 +90,26 @@ def main():
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)
 
-    # Load BERT model and tokenizer for text corruption
-    # bertattack_tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-large-uncased", use_fast=True)
-    # bertattack_mlm = AutoModelForMaskedLM.from_pretrained("google-bert/bert-large-uncased").to(device_mlm)
-    # bertattack_mlm.eval()
-
-    trepat_rephraser = Rephraser(
-        model=ATTACK_MODEL,
-        device=device_mlm,
-        command=COMMAND,
-    )
+    trepat_rephraser = None
+    bertattack_tokenizer = None
+    bertattack_mlm = None
+    if args.attack_method == "trepat":
+        trepat_rephraser = Rephraser(
+            model=ATTACK_MODEL,
+            device=device_mlm,
+            command=COMMAND,
+        )
+    else:
+        bertattack_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", use_fast=True)
+        bertattack_mlm = AutoModelForMaskedLM.from_pretrained("bert-base-uncased").to(device_mlm)
+        bertattack_mlm.eval()
 
     # Select dataset class and load function dynamically
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
 
-    # Results dir setup
-    output_dir = os.path.join(args.results_path, "perturbed", "text")
+    # Results dir setup (separate subdir per attack method to avoid overwriting)
+    output_dir = os.path.join(args.results_path, "perturbed", "text", args.attack_method)
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
@@ -151,7 +155,10 @@ def main():
             if label == args.source_label:
                 # Text perturbation
                 with torch.no_grad():
-                    news_txt_per, txt_similarity = trepat_attack(model, tokenizer, processor, args, news, label, device, trepat_rephraser)
+                    if args.attack_method == "trepat":
+                        news_txt_per, txt_similarity = trepat_attack(model, tokenizer, processor, args, news, label, device, trepat_rephraser)
+                    else:
+                        news_txt_per, txt_similarity = bertattack_attack(model, tokenizer, processor, args, news, label, device, bertattack_tokenizer, bertattack_mlm, device_mlm)
                 torch.cuda.empty_cache()
 
                 # Ensure the text corruption is effective, if not use the original text as corrupted text

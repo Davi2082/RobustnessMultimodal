@@ -290,7 +290,7 @@ def bertattack(
     mlm_device,
     use_bpe=USE_BPE,
 ):
-    feat = Feature(news["txt"], int(label))
+    feat = bert_attack.Feature(news["txt"], int(label))
 
     tgt_model = BertAttackThemisWrapper(
         themis_model=model,

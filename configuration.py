@@ -13,7 +13,7 @@ DEVICE_MLM = "cuda:1"  # BERT MLM (text/multimodal attacks only)
 
 # Model parameters
 BATCH_SIZE = 128
-N_TOKENS = 128
+N_TOKENS = 256
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
@@ -26,27 +26,28 @@ TARGET_LABEL = 1 # Real
 PGD_ITERS = 20
 EPSILON = 8 / 255
 ALPHA_FACTOR = 0.01
-## TrePat attack parameters
-ATTACK_MODEL = "LLAMA8B" # options: "OLDGEMMA", "LLAMA1B", "LLAMA3B", "LLAMA8B", "GEMMA2B", "GEMMA9B", "OLMO7B"
-COMMAND = "PARAPHRASE" # options: "REPHRASE": "Rephrase the provided input text.", 
-                   # "PARAPHRASE": "Paraphrase the provided input text.", 
-                   # "SIMPLIFY": "Simplify the provided input text.", 
-                   # "FORMAL": "Rewrite the provided input text in a more formal style.", 
-                   # "INFORMAL": "Rewrite the provided input text in a less formal style.", 
+## TrePat attack parameters (matched to Przybyła et al. 2025, arXiv:2410.20940 final-evaluation config)
+ATTACK_MODEL = "OLMO7B" # paper's chosen LLM ("we have decided to use OLMO due to its open and transparent features")
+COMMAND = "INFORMAL" # paper's best prompt for journalistic/news text (their HN task): "INFORMAL rephrasing for text from journalistic ... sources"
+                   # options: "REPHRASE": "Rephrase the provided input text.",
+                   # "PARAPHRASE": "Paraphrase the provided input text.",
+                   # "SIMPLIFY": "Simplify the provided input text.",
+                   # "FORMAL": "Rewrite the provided input text in a more formal style.",
+                   # "INFORMAL": "Rewrite the provided input text in a less formal style.",
                    # "CHANGE": "Make changes to the provided input text."
-MAX_CHANGE_TOTAL = 1 # Maximum change size relative to the full text
-MAX_CHANGE_FRAGMENT = 1 # Maximum change size relative to the current fragment
-MAX_VARIANTS = 10000 # Maximum number of candidate variants evaluated
-MIN_CHUNK_OR_SENTENCE_LENGTH = 60 # Merge fragments shorter than MIN_CHUNK_OR_SENTENCE_LENGTH characters
-RESPONSES_EXPECTED = 10 # Number of paraphrases requested per fragment
-## Bert-Attack attack parameters
-K_BERT_ATTACK = 100 # Number of candidates to consider for each word in the attack
-THRESHOLD_PRED_SCORE = 0
+MAX_CHANGE_TOTAL = 0.333 # paper: discard changes modifying more than 1/3 of the whole text
+MAX_CHANGE_FRAGMENT = 0.667 # paper: discard changes modifying more than 2/3 of the fragment
+MAX_VARIANTS = 50 # paper's default query limit (Experiments 1-3 and final evaluation; Fig.2 also tests 10/100/250)
+MIN_CHUNK_OR_SENTENCE_LENGTH = 60 # paper: fragments shorter than 60 characters lack context for the LLM to rephrase
+RESPONSES_EXPECTED = 5 # paper's REPHRASE prompt: "Return five different rephrasings, separated by newline"
+## Bert-Attack attack parameters (matched to Li et al. 2020 original repo, cmd.txt)
+K_BERT_ATTACK = 48 # paper's exact value: "--k 48"
+THRESHOLD_PRED_SCORE = 0 # paper's exact value: "--threshold_pred_score 0"
 MAX_WORDS_TO_ATTACK = 1024
 MAX_CANDIDATES_PER_WORD = 64 # Maximum number of candidates to consider for each word in the attack
 MAX_WORDS_FOR_IMPORTANCE = 1024
-MAX_CHANGE_RATIO = 1.0 # Max fraction of words BERTAttack may substitute before giving up (default 0.4)
+MAX_CHANGE_RATIO = 0.4 # paper's exact value: perturbable word cap hardcoded as 0.4 * len(words)
 MIN_TXT_SIMILARITY = 0.0 # Post-hoc USE semantic similarity floor; revert to original if below
-USE_BPE = 1 # 1 = also attack multi-subword words (native BPE reconstruction); 0 = single-token words only
+USE_BPE = 1 # paper's exact value: "--use_bpe 1"
 ## Multimodal attack parameters
 ALTERNATION_ROUNDS = 1 # Rounds of interleaved image-PGD + text-BERTAttack (1 = single biperturbed pass)
