@@ -18,7 +18,7 @@ python run_pipeline.py
 It runs every stage in order and stops at the first failure:
 
 1. clean evaluation — text, image, feature-fusion (`eval.py`);
-2. adversarial attacks — image (PGD), text (BERTAttack), multimodal (`attacks/`);
+2. adversarial attacks — image (PGD), text ([TrePAT](https://github.com/piotrmp/trepat)), multimodal (`attacks/`);
 3. late-fusion aggregation (`late_fusion_perturbation.py`);
 4. metrics + ROC plots (`create_rocs_plots.py`).
 
@@ -127,7 +127,7 @@ Before running the pipeline, check at least:
 - classification threshold;
 - result root directory (`RESULT_PATH` in `paths.py`);
 - PGD parameters (`EPSILON`, `PGD_ITERS`, `ALPHA_FACTOR`);
-- BERTAttack parameters (`K_BERT_ATTACK`, etc.);
+- text-attack parameters (TrePAT);
 - source and target labels;
 - subset size for quick test runs (`SUBSET_SIZE`).
 
@@ -168,6 +168,8 @@ For a single-GPU machine, replace them with `cuda:0`, provided that enough memor
 ## 5. Prepare the datasets
 
 Each dataset must be stored inside the `data/` directory.
+
+The dataset images can be downloaded from the [shared SharePoint folder](https://unicadrsi-my.sharepoint.com/:f:/g/personal/davide_cocco3_unica_it/IgDSE593y2bxTIPoGl47GVzqAY1IdmYEagfXvgmOvTC4naI?e=iGhc8G). Download them and preserve the directory structure shown below when placing them under `data/`.
 
 A dataset folder must contain:
 
@@ -437,7 +439,7 @@ python attacks/text_attack.py
 The script:
 
 1. loads the clean text-model parameters;
-2. loads `bert-base-uncased` for BERTAttack;
+2. uses [TrePAT](https://github.com/piotrmp/trepat) to generate the text perturbations;
 3. generates adversarial text;
 4. evaluates the text model on the perturbed input;
 5. saves predictions and attack parameters.
@@ -919,17 +921,9 @@ Ensure that this pattern matches an existing file:
 data/<DatasetName>/test.*
 ```
 
-### BERTAttack cannot load its masked-language model
+### TrePAT setup fails
 
-The first execution downloads:
-
-```text
-bert-base-uncased
-```
-
-through Hugging Face Transformers.
-
-For offline execution, download and cache the model beforehand.
+Verify that TrePAT and its dependencies are installed following the [official TrePAT repository](https://github.com/piotrmp/trepat). For offline execution, download and cache every required model beforehand.
 
 ---
 
