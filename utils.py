@@ -1293,7 +1293,8 @@ def build_curve_name(args):
             name += f"-{args.mode}"
         if args.perturbation_type is not None:
             name += f"|{args.perturbation_type}"
-    name += f"|{args.type}"
+    if args.modality == "text" or args.modality == "image":
+        name += f"|{args.type}"
     return name
 
 def update_roc_cache( roc_set, curve_name, auc, fpr, tpr):

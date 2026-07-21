@@ -109,7 +109,7 @@ def main():
     load_func = load_functions[args.dataset]
 
     # Results dir setup (separate subdir per attack method to avoid overwriting)
-    output_dir = os.path.join(args.results_path, "perturbed", "text", args.attack_method)
+    output_dir = os.path.join(args.results_path, "perturbed", "text")
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
