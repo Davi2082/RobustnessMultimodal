@@ -670,24 +670,52 @@ def save_results(
     with open(os.path.join(result_dir, "result.json"), "w") as f:
         json.dump(result_data, f, indent=4)
 
-def save_predictions(y_true, y_preds, scores, logits, indices, output_dir, ssims=None, txt_similarities=None):
+def save_predictions(
+    y_true,
+    y_preds,
+    scores,
+    logits,
+    indices,
+    output_dir,
+    ssims=None,
+    txt_similarities=None,
+    extra_columns=None,
+):
+    """Save aligned prediction arrays and optional experiment-specific fields.
+
+    ``extra_columns`` lets callers extend the common CSV contract without
+    writing a file and reading it back just to append columns. Existing
+    callers remain compatible because the new argument is optional.
+    """
     data = {
-            'index': indices,
-            'label': y_true,
-            'pred': y_preds,
-            'score': scores,
-            'logit': logits,
-        }
-    
+        "index": indices,
+        "label": y_true,
+        "pred": y_preds,
+        "score": scores,
+        "logit": logits,
+    }
+
     if ssims is not None:
-        data.update({
-            'ssim': ssims
-        })
+        data["ssim"] = ssims
     if txt_similarities is not None:
-        data.update({
-            'text similarity': txt_similarities
-        })
-    
+        data["text similarity"] = txt_similarities
+
+    if extra_columns:
+        duplicate_columns = set(data).intersection(extra_columns)
+        if duplicate_columns:
+            duplicates = ", ".join(sorted(duplicate_columns))
+            raise ValueError(
+                f"extra_columns cannot replace standard fields: {duplicates}"
+            )
+        data.update(extra_columns)
+
+    lengths = {
+        column: len(np.asarray(values).reshape(-1))
+        for column, values in data.items()
+    }
+    if len(set(lengths.values())) != 1:
+        raise ValueError(f"Prediction columns have different lengths: {lengths}")
+
     df = pd.DataFrame(data)
     df.to_csv(output_dir, index=False)
 
@@ -948,93 +976,268 @@ def plot_score_space_fig7(
     image_clean,
     text_pert,
     image_pert,
-    out_file,
+    out_file=None,
     fusion="min",
     threshold=0.5,
     source_label=0,
     grid=400,
     pad=2.0,
+    *,
+    svm_model=None,
+    svm_input="scores",
+    svm_positive_label=1,
+    svm_batch_size=50_000,
+    attack_mode="all",
+    title=None,
+    ax=None,
+    add_colorbar=True,
 ):
-    """Recreation of the score-space panel of Biggio et al. (TPAMI 2017, Fig. 7),
-    but on the model LOGITS instead of the sigmoid scores. Themis is heavily
-    overconfident, so the [0,1] score space is degenerate (all points pin to the
-    corners); logits keep the samples spread out. The fusion is still computed on
-    the sigmoid scores, so the background heatmap is the fused score f(s) and the
-    decision boundary at score-threshold 0.5 maps to the origin in logit space:
-        min  -> L-corner at (0,0)      max -> inverted-L at (0,0)
-        mean -> anti-diagonal  logit_text + logit_image = 0
+    """Plot the multimodal score space inspired by Biggio et al., Fig. 7.
 
-    Axes are the two unimodal model logits. Attacks only target `source_label`
-    (Fake) samples, so the three attacked classes are displaced Fakes:
-        text-attacked  = (perturbed text logit, clean image logit)
-        image-attacked = (clean text logit, perturbed image logit)
-        both-attacked  = (perturbed text logit, perturbed image logit)
+    The axes contain the two unimodal model logits.  ``min``, ``max`` and
+    ``mean`` fusion are computed on the corresponding sigmoid scores.  With
+    ``fusion="svm_rbf"``, the background and decision boundary are computed
+    from a fitted probabilistic RBF-SVM supplied through ``svm_model``.
+
+    The SVM must be fitted before this function is called, preferably through
+    a pipeline containing any preprocessing used at training time.  Its two
+    input features must be ordered as ``[text, image]`` and must match
+    ``svm_input``:
+
+    * ``"scores"``: sigmoid(text logit), sigmoid(image logit);
+    * ``"logits"``: raw text and image logits.
+
+    ``attack_mode`` controls which displaced source-class samples are drawn:
+    ``"text"``, ``"image"``, ``"both"``, or ``"all"``.  Passing ``ax`` lets
+    callers build multi-panel figures; otherwise the function preserves its
+    original standalone save behaviour through ``out_file``.
+
+    Parameters added to the original function are keyword-only, so existing
+    min/max/mean calls remain compatible.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axis containing the plot.
     """
     y_true = np.asarray(y_true).reshape(-1)
-    tc = np.asarray(text_clean).reshape(-1)
-    ic = np.asarray(image_clean).reshape(-1)
-    tp = np.asarray(text_pert).reshape(-1)
-    ip = np.asarray(image_pert).reshape(-1)
+    tc = np.asarray(text_clean, dtype=np.float64).reshape(-1)
+    ic = np.asarray(image_clean, dtype=np.float64).reshape(-1)
+    tp = np.asarray(text_pert, dtype=np.float64).reshape(-1)
+    ip = np.asarray(image_pert, dtype=np.float64).reshape(-1)
+
+    lengths = {y_true.size, tc.size, ic.size, tp.size, ip.size}
+    if len(lengths) != 1:
+        raise ValueError(
+            "y_true, clean logits, and perturbed logits must have equal lengths"
+        )
+    if y_true.size == 0:
+        raise ValueError("Cannot plot an empty score space")
+    if not all(np.all(np.isfinite(values)) for values in (tc, ic, tp, ip)):
+        raise ValueError("Score-space logits must be finite")
+    if fusion not in {"min", "max", "mean", "svm_rbf"}:
+        raise ValueError(f"Unknown fusion rule: {fusion}")
+    if attack_mode not in {"text", "image", "both", "all"}:
+        raise ValueError(f"Unknown attack mode: {attack_mode}")
+    if grid < 2:
+        raise ValueError("grid must be at least 2")
+    if svm_batch_size <= 0:
+        raise ValueError("svm_batch_size must be positive")
 
     fake = y_true == source_label
     real = ~fake
+    if not np.any(fake):
+        raise ValueError(f"No sample has source_label={source_label}")
 
     def _sigmoid(z):
-        return 1.0 / (1.0 + np.exp(-z))
+        """Numerically stable sigmoid for arrays of logits."""
+        z = np.asarray(z, dtype=np.float64)
+        result = np.empty_like(z)
+        non_negative = z >= 0
+        result[non_negative] = 1.0 / (1.0 + np.exp(-z[non_negative]))
+        exp_z = np.exp(z[~non_negative])
+        result[~non_negative] = exp_z / (1.0 + exp_z)
+        return result
 
-    # Axis ranges from all plotted logits (both clean and perturbed), padded
-    xs = np.concatenate([tc, tp[fake]])
-    ys = np.concatenate([ic, ip[fake]])
-    xlo, xhi = xs.min() - pad, xs.max() + pad
-    ylo, yhi = ys.min() - pad, ys.max() + pad
+    def _svm_features(text_logits, image_logits):
+        if svm_input == "scores":
+            text_values = _sigmoid(text_logits)
+            image_values = _sigmoid(image_logits)
+        elif svm_input == "logits":
+            text_values = np.asarray(text_logits, dtype=np.float64)
+            image_values = np.asarray(image_logits, dtype=np.float64)
+        else:
+            raise ValueError(f"Unknown svm_input: {svm_input}")
+        return np.column_stack((text_values, image_values))
 
-    # Fused-score surface over the logit grid (fusion applied to sigmoid scores)
+    def _svm_scores(text_logits, image_logits):
+        if svm_model is None:
+            raise ValueError("svm_model is required when fusion='svm_rbf'")
+        if not hasattr(svm_model, "predict_proba"):
+            raise TypeError(
+                "svm_model must expose predict_proba; train SVC with probability=True"
+            )
+        if not hasattr(svm_model, "classes_"):
+            raise TypeError("svm_model must expose its fitted classes_ attribute")
+
+        class_indices = np.flatnonzero(
+            np.asarray(svm_model.classes_) == svm_positive_label
+        )
+        if class_indices.size != 1:
+            raise ValueError(
+                f"svm_positive_label={svm_positive_label} is not uniquely present "
+                f"in SVM classes {svm_model.classes_}"
+            )
+        positive_index = int(class_indices[0])
+
+        features = _svm_features(text_logits, image_logits)
+        scores = np.empty(features.shape[0], dtype=np.float64)
+        for start in range(0, features.shape[0], svm_batch_size):
+            stop = min(start + svm_batch_size, features.shape[0])
+            scores[start:stop] = svm_model.predict_proba(features[start:stop])[
+                :, positive_index
+            ]
+        return scores
+
+    # Only include coordinates belonging to the selected scenario when the
+    # logit-space limits are computed.
+    x_parts = [tc]
+    y_parts = [ic]
+    if attack_mode in {"text", "both", "all"}:
+        x_parts.append(tp[fake])
+    if attack_mode in {"image", "both", "all"}:
+        y_parts.append(ip[fake])
+    xs = np.concatenate(x_parts)
+    ys = np.concatenate(y_parts)
+    xlo, xhi = float(xs.min() - pad), float(xs.max() + pad)
+    ylo, yhi = float(ys.min() - pad), float(ys.max() + pad)
+
     gx = np.linspace(xlo, xhi, grid)
     gy = np.linspace(ylo, yhi, grid)
-    X, Y = np.meshgrid(gx, gy)
-    SX, SY = _sigmoid(X), _sigmoid(Y)
-    if fusion == "min":
-        F = np.minimum(SX, SY)
-    elif fusion == "max":
-        F = np.maximum(SX, SY)
-    elif fusion == "mean":
-        F = 0.5 * (SX + SY)
+    x_grid, y_grid = np.meshgrid(gx, gy)
+
+    if fusion == "svm_rbf":
+        fused_grid = _svm_scores(x_grid.ravel(), y_grid.ravel()).reshape(
+            x_grid.shape
+        )
+        colorbar_label = "fused score  f = P(positive | RBF-SVM)"
+        default_title = f"Logit space — RBF-SVM fusion (boundary at {threshold})"
     else:
-        raise ValueError(f"Unknown fusion rule: {fusion}")
+        text_grid_scores = _sigmoid(x_grid)
+        image_grid_scores = _sigmoid(y_grid)
+        if fusion == "min":
+            fused_grid = np.minimum(text_grid_scores, image_grid_scores)
+        elif fusion == "max":
+            fused_grid = np.maximum(text_grid_scores, image_grid_scores)
+        else:
+            fused_grid = 0.5 * (text_grid_scores + image_grid_scores)
+        colorbar_label = (
+            f"fused score  f = {fusion}(sigmoid(text), sigmoid(image))"
+        )
+        default_title = (
+            f"Logit space — {fusion} fusion (boundary at score={threshold})"
+        )
 
-    plt.figure(figsize=(8, 8))
-    # Background heatmap of the fused score (grayscale, as in the paper)
-    plt.imshow(F, origin="lower", extent=[xlo, xhi, ylo, yhi], cmap="Greys",
-               alpha=0.6, aspect="auto", vmin=0.0, vmax=1.0)
-    plt.colorbar(label=f"fused score  f = {fusion}(sigmoid(text), sigmoid(image))")
-    # Decision boundary at score-threshold (black solid line)
-    plt.contour(X, Y, F, levels=[threshold], colors="black", linewidths=2)
+    owns_figure = ax is None
+    if owns_figure:
+        figure, ax = plt.subplots(figsize=(8, 8))
+    else:
+        figure = ax.figure
 
-    # Genuine / impostor / displaced-Fake logit points
-    plt.scatter(tc[real], ic[real], c="blue", marker="+", s=70, linewidths=1.5,
-                label="Real (genuine)")
-    plt.scatter(tc[fake], ic[fake], c="red", marker="o", s=40, alpha=0.9,
-                edgecolors="darkred", label="Fake (impostor)")
-    plt.scatter(tp[fake], ic[fake], c="green", marker="s", s=35, alpha=0.8,
-                label="Text-attacked")
-    plt.scatter(tc[fake], ip[fake], c="cyan", marker="^", s=45, alpha=0.8,
-                edgecolors="teal", label="Image-attacked")
-    plt.scatter(tp[fake], ip[fake], c="magenta", marker="D", s=35, alpha=0.8,
-                label="Both-attacked")
+    heatmap = ax.imshow(
+        fused_grid,
+        origin="lower",
+        extent=[xlo, xhi, ylo, yhi],
+        cmap="Greys",
+        alpha=0.6,
+        aspect="auto",
+        vmin=0.0,
+        vmax=1.0,
+    )
+    if add_colorbar:
+        figure.colorbar(heatmap, ax=ax, label=colorbar_label)
 
-    # Score-0.5 reference lines (logit = 0 on each axis)
-    plt.axvline(0, linestyle="--", color="gray", linewidth=1)
-    plt.axhline(0, linestyle="--", color="gray", linewidth=1)
+    # Some fitted SVMs may place their entire 0.5 boundary outside the visible
+    # logit range.  Avoid a misleading empty-contour warning in that case.
+    if float(fused_grid.min()) <= threshold <= float(fused_grid.max()):
+        ax.contour(
+            x_grid,
+            y_grid,
+            fused_grid,
+            levels=[threshold],
+            colors="black",
+            linewidths=2,
+        )
 
-    plt.xlim(xlo, xhi)
-    plt.ylim(ylo, yhi)
-    plt.xlabel("Text-model logit")
-    plt.ylabel("Image-model logit")
-    plt.title(f"Logit space — {fusion} fusion (boundary at score={threshold})")
-    plt.legend(loc="lower left", framealpha=0.9)
-    plt.tight_layout()
-    plt.savefig(out_file, dpi=150)
-    plt.close()
+    ax.scatter(
+        tc[real],
+        ic[real],
+        c="blue",
+        marker="+",
+        s=70,
+        linewidths=1.5,
+        label="Real (genuine)",
+    )
+    ax.scatter(
+        tc[fake],
+        ic[fake],
+        c="red",
+        marker="o",
+        s=40,
+        alpha=0.9,
+        edgecolors="darkred",
+        label="Fake (impostor)",
+    )
+
+    if attack_mode in {"text", "all"}:
+        ax.scatter(
+            tp[fake],
+            ic[fake],
+            c="green",
+            marker="s",
+            s=35,
+            alpha=0.8,
+            label="Text-attacked",
+        )
+    if attack_mode in {"image", "all"}:
+        ax.scatter(
+            tc[fake],
+            ip[fake],
+            c="cyan",
+            marker="^",
+            s=45,
+            alpha=0.8,
+            edgecolors="teal",
+            label="Image-attacked",
+        )
+    if attack_mode in {"both", "all"}:
+        ax.scatter(
+            tp[fake],
+            ip[fake],
+            c="magenta",
+            marker="D",
+            s=35,
+            alpha=0.8,
+            label="Both-attacked",
+        )
+
+    ax.axvline(0, linestyle="--", color="gray", linewidth=1)
+    ax.axhline(0, linestyle="--", color="gray", linewidth=1)
+    ax.set_xlim(xlo, xhi)
+    ax.set_ylim(ylo, yhi)
+    ax.set_xlabel("Text-model logit")
+    ax.set_ylabel("Image-model logit")
+    ax.set_title(default_title if title is None else title)
+    ax.legend(loc="lower left", framealpha=0.9)
+
+    if owns_figure and out_file is not None:
+        output_path = Path(out_file)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        figure.tight_layout()
+        figure.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close(figure)
+
+    return ax
 
 def plot_layer_logits_grid(y_true, text_layer_logits, image_layer_logits, out_file,
                            source_label=0):

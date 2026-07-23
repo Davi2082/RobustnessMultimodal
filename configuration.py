@@ -51,3 +51,25 @@ MIN_TXT_SIMILARITY = 0.0 # Post-hoc USE semantic similarity floor; revert to ori
 USE_BPE = 1 # paper's exact value: "--use_bpe 1"
 ## Multimodal attack parameters
 ALTERNATION_ROUNDS = 1 # Rounds of interleaved image-PGD + text-BERTAttack (1 = single biperturbed pass)
+
+# Late-fusion experiments
+#
+# PGD_ITERS and MAX_VARIANTS are the budgets of the corresponding unimodal
+# attacks. A late-fusion attack uses half of each modality budget, regardless
+# of whether the requested scenario attacks text, image, or both. Keeping the
+# effective budgets here also makes direct invocations consistent with the
+# batch runner.
+LATE_FUSION_METHODS = ("min", "max", "mean", "svm-rbf")
+LATE_FUSION_ATTACK_SCOPES = ("image", "text", "both")
+LATE_FUSION_BUDGET_DIVISOR = 2
+LATE_FUSION_PGD_ITERS = max(1, PGD_ITERS // LATE_FUSION_BUDGET_DIVISOR)
+LATE_FUSION_MAX_VARIANTS = max(
+    1,
+    MAX_VARIANTS // LATE_FUSION_BUDGET_DIVISOR,
+)
+
+# The RBF-SVM is fitted on clean text/image predictions from the training set.
+LATE_FUSION_SVM_INPUT = "scores"
+LATE_FUSION_SVM_C = 1.0
+LATE_FUSION_SVM_GAMMA = "scale"
+LATE_FUSION_SVM_SEED = 42
