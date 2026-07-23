@@ -37,7 +37,7 @@ COMMAND = "INFORMAL" # paper's best prompt for journalistic/news text (their HN 
                    # "CHANGE": "Make changes to the provided input text."
 MAX_CHANGE_TOTAL = 0.333 # paper: discard changes modifying more than 1/3 of the whole text
 MAX_CHANGE_FRAGMENT = 0.667 # paper: discard changes modifying more than 2/3 of the fragment
-MAX_VARIANTS = 50 # paper's default query limit (Experiments 1-3 and final evaluation; Fig.2 also tests 10/100/250)
+MAX_VARIANTS = 100 # paper's default query limit (Experiments 1-3 and final evaluation; Fig.2 also tests 10/100/250)
 MIN_CHUNK_OR_SENTENCE_LENGTH = 60 # paper: fragments shorter than 60 characters lack context for the LLM to rephrase
 RESPONSES_EXPECTED = 5 # paper's REPHRASE prompt: "Return five different rephrasings, separated by newline"
 ## Bert-Attack attack parameters (matched to Li et al. 2020 original repo, cmd.txt)
@@ -55,18 +55,25 @@ ALTERNATION_ROUNDS = 1 # Rounds of interleaved image-PGD + text-BERTAttack (1 = 
 # Late-fusion experiments
 #
 # PGD_ITERS and MAX_VARIANTS are the budgets of the corresponding unimodal
-# attacks. A late-fusion attack uses half of each modality budget, regardless
-# of whether the requested scenario attacks text, image, or both. Keeping the
-# effective budgets here also makes direct invocations consistent with the
-# batch runner.
+# attacks. A single-modality scenario keeps that full budget. Only the "both"
+# scenario splits the comparison budget and therefore uses half for each
+# independently attacked modality.
 LATE_FUSION_METHODS = ("min", "max", "mean", "svm-rbf")
 LATE_FUSION_ATTACK_SCOPES = ("image", "text", "both")
 LATE_FUSION_BUDGET_DIVISOR = 2
-LATE_FUSION_PGD_ITERS = max(1, PGD_ITERS // LATE_FUSION_BUDGET_DIVISOR)
-LATE_FUSION_MAX_VARIANTS = max(
-    1,
-    MAX_VARIANTS // LATE_FUSION_BUDGET_DIVISOR,
-)
+
+def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
+    """Return the scope-specific effective budgets and their divisor."""
+    if attack_scope not in LATE_FUSION_ATTACK_SCOPES:
+        raise ValueError(f"Unknown late-fusion attack scope: {attack_scope}")
+
+    divisor = LATE_FUSION_BUDGET_DIVISOR if attack_scope == "both" else 1
+    return {
+        "pgd_iters": max(1, PGD_ITERS // divisor),
+        "max_variants": max(1, MAX_VARIANTS // divisor),
+        "divisor": divisor,
+    }
+
 
 # The RBF-SVM is fitted on clean text/image predictions from the training set.
 LATE_FUSION_SVM_INPUT = "scores"

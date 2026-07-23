@@ -2,8 +2,8 @@
 
 The runner first fits the RBF-SVM on clean training predictions, then runs the
 three independent attack scopes for every fusion method, and finally creates
-the three requested four-panel figures. Every late-fusion attack uses the
-half budgets configured in ``configuration.py``.
+the three requested four-panel figures. Single-modality scenarios use the
+full corresponding attack budget; only ``both`` uses half per modality.
 """
 
 import joblib
@@ -19,13 +19,12 @@ from sklearn.svm import SVC
 
 from configuration import (
     LATE_FUSION_ATTACK_SCOPES,
-    LATE_FUSION_MAX_VARIANTS,
     LATE_FUSION_METHODS,
-    LATE_FUSION_PGD_ITERS,
     LATE_FUSION_SVM_C,
     LATE_FUSION_SVM_GAMMA,
     LATE_FUSION_SVM_INPUT,
     LATE_FUSION_SVM_SEED,
+    late_fusion_attack_budgets,
 )
 from paths import (
     LATE_FUSION_FIGURES_DIR,
@@ -167,27 +166,28 @@ def run(command: list[str], log_file: str, label: str) -> None:
 
 
 def attack_budget_arguments(attack_scope: str) -> tuple[list[str], str]:
-    """Return the effective half-budget arguments for one scenario."""
-    if attack_scope not in LATE_FUSION_ATTACK_SCOPES:
-        raise ValueError(f"Unknown attack scope: {attack_scope}")
+    """Return the active, scope-specific budget arguments."""
+    budgets = late_fusion_attack_budgets(attack_scope)
 
     arguments: list[str] = []
     labels: list[str] = []
 
     if attack_scope in {"text", "both"}:
+        max_variants = budgets["max_variants"]
         arguments.extend(
-            ["--max-variants", str(LATE_FUSION_MAX_VARIANTS)]
+            ["--max-variants", str(max_variants)]
         )
         labels.append(
-            f"TRePAT max variants={LATE_FUSION_MAX_VARIANTS}"
+            f"TRePAT max variants={max_variants}"
         )
 
     if attack_scope in {"image", "both"}:
+        pgd_iters = budgets["pgd_iters"]
         arguments.extend(
-            ["--pgd-iters", str(LATE_FUSION_PGD_ITERS)]
+            ["--pgd-iters", str(pgd_iters)]
         )
         labels.append(
-            f"PGD iterations={LATE_FUSION_PGD_ITERS}"
+            f"PGD iterations={pgd_iters}"
         )
 
     return arguments, ", ".join(labels)
