@@ -8,33 +8,36 @@ The project is organized as a modular pipeline. Clean inference, adversarial att
 
 ## Quick start
 
-To run the **entire pipeline end-to-end with the default configuration** — no
-need to edit `configuration.py` or `paths.py` — use the orchestrator script:
+The main entry point is `run_pipeline.py`. Select a dataset and a model type; checkpoint paths are resolved automatically from `models/weights/<dataset>/`.
 
 ```bash
-python run_pipeline.py
+python run_pipeline.py --dataset Recovery --model feature-fusion
 ```
 
-It runs every stage in order and stops at the first failure:
+Supported model selections are:
 
-1. clean evaluation — text, image, feature-fusion (`eval.py`);
-2. adversarial attacks — image (PGD), text ([TrePAT](https://github.com/piotrmp/trepat)), multimodal (`attacks/`);
-3. late-fusion aggregation (`late_fusion_perturbation.py`);
-4. metrics + ROC plots (`create_rocs_plots.py`).
+- `text`;
+- `image`;
+- `feature-fusion`;
+- `late-fusion` with `--fusion mean|min|max`.
 
-Each stage logs to its own file under `logs/` (e.g. `logs/eval_text.log`,
-`logs/multimodal_attack.log`). Results land under `RESULT_PATH` and ROC plots
-under the `figures/` ROC directory (both defined in `paths.py`).
+Examples:
 
-This assumes the environment, datasets, and model weights are already in place
-(steps 1–6 below). For a fast smoke test of the whole pipeline, set
-`SUBSET_SIZE` in `configuration.py` to a small number (see
-[Quick test runs](#quick-test-runs-subset_size)) before launching it.
+```bash
+python run_pipeline.py --dataset Recovery --model text
+python run_pipeline.py --dataset Recovery --model image
+python run_pipeline.py --dataset Recovery --model late-fusion --fusion max
+```
 
-The individual scripts documented in the rest of this README remain available
-for running or customizing a single stage.
+Use `--list` to display compatible experiments, `--only` to select experiments, and `--dry-run` to preview the workflow without running models:
 
----
+```bash
+python run_pipeline.py --dataset Recovery --model feature-fusion --list
+python run_pipeline.py --dataset Recovery --model feature-fusion --only clean pgd
+python run_pipeline.py --dataset Recovery --model late-fusion --fusion mean --dry-run
+```
+
+Technical subprocess commands are hidden by default. Add `--show-commands` when debugging. Logs are stored under `logs/pipeline/<dataset>/<model>/`, and results under `results/<dataset>/classification_results/`.
 
 ## Requirements
 
@@ -116,140 +119,105 @@ pip install numpy==1.26.4
 
 ## 4. Configure the project
 
-Model and attack hyperparameters are defined in `configuration.py`.
-Filesystem paths (result directories, CSV paths, weight file paths) are defined in `paths.py`.
+Shared model, device, and attack defaults are defined in `configuration_files/configuration.py`. Derived filesystem paths are defined in `configuration_files/paths.py`. Command-line values supplied to `run_pipeline.py` take precedence for dataset and model selection.
 
-Before running the pipeline, check at least:
+For quick checks, set `SUBSET_SIZE` to a small integer. Use `None` for the complete test set. CUDA devices are controlled by `DEVICE`, `DEVICE_EVAL`, and `DEVICE_MLM`.
 
-- model and encoder names (`NAME_LLM`, `NAME_IMG_EMBED`);
-- model-weight paths (`TEXT_WEIGHTS_PATH`, `IMAGE_WEIGHTS_PATH`, `FF_WEIGHTS_PATH`);
-- batch size and maximum token length;
-- classification threshold;
-- result root directory (`RESULT_PATH` in `paths.py`);
-- PGD parameters (`EPSILON`, `PGD_ITERS`, `ALPHA_FACTOR`);
-- text-attack parameters (TrePAT);
-- source and target labels;
-- subset size for quick test runs (`SUBSET_SIZE`).
+## 5. Prepare or add a dataset
 
-Most values can also be overridden through command-line arguments.
-
-### Quick test runs (`SUBSET_SIZE`)
-
-`SUBSET_SIZE` in `configuration.py` restricts both the clean evaluation
-(`eval.py`) and all three attacks to the **first `N` samples** of the test set,
-so you can sanity-check the full pipeline in seconds instead of running on the
-whole dataset:
-
-```python
-# configuration.py
-SUBSET_SIZE = None  # full dataset (default)
-SUBSET_SIZE = 8     # only the first 8 samples — quick smoke test
-```
-
-It is a single switch that applies everywhere (clean eval + image / text /
-multimodal attacks), so the clean and perturbed result sets stay aligned on the
-same samples. Set it back to `None` for a full run.
-
-### CUDA devices
-
-The current scripts contain explicit CUDA assignments:
-
-- `eval.py` uses `cuda`;
-- `image_attack.py` uses `cuda:1`;
-- `text_attack.py` uses `cuda:1` for the classifier and `cuda:2` for BERT;
-- `multimodal_attack.py` uses `cuda:1` for the classifier and `cuda:2` for BERT.
-
-Adapt these assignments to the available hardware.
-
-For a single-GPU machine, replace them with `cuda:0`, provided that enough memory is available.
-
----
-
-## 5. Prepare the datasets
-
-Each dataset must be stored inside the `data/` directory.
-
-The dataset images can be downloaded from the [shared SharePoint folder](https://unicadrsi-my.sharepoint.com/:f:/g/personal/davide_cocco3_unica_it/IgDSE593y2bxTIPoGl47GVzqAY1IdmYEagfXvgmOvTC4naI?e=iGhc8G). Download them and preserve the directory structure shown below when placing them under `data/`.
-
-A dataset folder must contain:
-
-- an `images/` directory;
-- one test annotation file matching `test.*`;
-- any additional train or validation files required by the dataset implementation.
-
-Example:
+Datasets live below `data_loading/`:
 
 ```text
-data/
+data_loading/
+├── my_datasets.py
 ├── Recovery/
 │   ├── images/
-│   ├── test.csv
-│   ├── train.csv
-│   └── val.csv
-├── Fakeddit/
-│   ├── images/
-│   │   ├── test/
-│   │   ├── train/
-│   │   └── val/
-│   ├── test.tsv
-│   ├── train.tsv
-│   └── val.tsv
-└── YourNewDataset/
+│   ├── train_augmented.csv
+│   ├── val_augmented.csv
+│   └── test.csv
+└── NewDataset/
     ├── images/
+    ├── train.csv
+    ├── val.csv
     └── test.csv
 ```
 
-The scripts locate the test annotations with:
+Training accepts `train_augmented.csv`, `train_augmented.tsv`, `train.csv`, or `train.tsv`, and the equivalent `val...` names. Evaluation requires exactly one `test.*` annotation file.
+
+To integrate a new dataset, add these two objects to `data_loading/my_datasets.py`:
 
 ```python
-glob.glob(f"data/{dataset}/test.*")[0]
+class NewDataset_Dataset(torch.utils.data.Dataset):
+    ...
+
+def newdataset_load_annotations_file(file_path):
+    ...
 ```
 
-Each dataset directory should therefore contain only one intended test annotation file matching that pattern.
+The names must follow `<DatasetName>_Dataset` and `<datasetname>_load_annotations_file`. Each dataset item must return:
 
-### Adding a new dataset
-
-For every new dataset, define the corresponding dataset class and annotation loader in `my_datasets.py`.
-
-Expected naming convention:
-
-```text
-{DatasetName}_Dataset
-{datasetname}_load_annotations_file
+```python
+image, label, tokenized_text, image_path, sample_index
 ```
 
-Example:
+After adding the directory and implementation, the dataset is discovered automatically by both `scripts/train.py` and the evaluation utilities. No hard-coded training registry needs to be edited.
 
-```text
-YourNewDataset_Dataset
-yournewdataset_load_annotations_file
+## 6. Train models
+
+Use the same trainer for all base model types:
+
+```bash
+python -m scripts.train --dataset NewDataset --model text
+python -m scripts.train --dataset NewDataset --model image
+python -m scripts.train --dataset NewDataset --model feature-fusion
 ```
 
-Available datasets are discovered dynamically through `load_available_datasets()`.
+Common options include:
 
----
-
-## 6. Prepare the model weights
-
-Place pretrained weights in the `model/` directory or provide their paths through `--model_path`.
-
-The pipeline supports three base predictive models:
-
-| Model identifier | Input |
+| Argument | Description |
 | --- | --- |
-| `feature-fusion` | Text and image |
-| `text` | Text only |
-| `image` | Image only |
+| `--dataset` | Dataset directory below `data_loading/` |
+| `--model` | `text`, `image`, or `feature-fusion` |
+| `--epochs` | Number of training epochs |
+| `--batch-size` | Training and validation batch size |
+| `--learning-rate` | AdamW learning rate |
+| `--device` | PyTorch device, for example `cuda:0` or `cpu` |
+| `--name-llm` | Hugging Face language-model identifier |
+| `--name-img-embed` | Image encoder identifier |
+| `--use-lora` / `--no-use-lora` | Enable or disable LoRA |
+| `--n-tokens` | Maximum tokenized text length |
 
-The following late-fusion configurations are derived from the scores generated independently by the text and image models:
+Run `python -m scripts.train --help` for the complete list. The best validation-F1 checkpoint is saved using a stable pipeline-compatible name:
 
-- `late-fusion-mean`;
-- `late-fusion-min`;
-- `late-fusion-max`.
+```text
+models/weights/<dataset>/best_text_only.pt
+models/weights/<dataset>/best_img_only.pt
+models/weights/<dataset>/best_feature_fusion.pt
 
-The text and image models may use different weight files. Make sure that each clean evaluation uses the correct model path.
+```
 
----
+Each checkpoint is accompanied by a `.json` metadata file containing the encoder and LoRA architecture settings. `run_pipeline.py` reads this sidecar automatically, so non-default training options are preserved during evaluation.
+
+Training curves are saved under `results/<dataset>/training/<model>/training_history.png`.
+
+To train every model needed for all fusion experiments on a new dataset:
+
+```bash
+python -m scripts.train --dataset NewDataset --model text
+python -m scripts.train --dataset NewDataset --model image
+python -m scripts.train --dataset NewDataset --model feature-fusion
+```
+
+Then run the pipeline without specifying checkpoint paths:
+
+```bash
+python run_pipeline.py --dataset NewDataset --model feature-fusion
+python run_pipeline.py --dataset NewDataset --model late-fusion --fusion max
+```
+
+Late fusion is not trained as a separate neural checkpoint. It combines the trained text-only and image-only models.
+
+The pipeline prefers the stable checkpoint names generated by `scripts.train`. For backward compatibility, it can also discover one unambiguous legacy checkpoint matching `*_txt_only.pt`, `*_img_only.pt`, or the feature-fusion pattern. If several legacy candidates exist and no stable checkpoint exists, it stops and reports the ambiguity.
 
 ## 7. Result-directory structure
 
@@ -295,7 +263,7 @@ results/
 
 ### Path consistency
 
-All path constants are centralised in `paths.py` (`RESULT_PATH`, `CLEAN_BASE`, `PERT_BASE`, and specific CSV / parameter paths). The `--results_path` CLI argument defaults to `RESULT_PATH`.
+All path constants are centralised in `configuration_files/paths.py` (`RESULT_PATH`, `CLEAN_BASE`, `PERT_BASE`, and specific CSV / parameter paths). The `--results_path` CLI argument defaults to `RESULT_PATH`.
 
 The commands below assume:
 
@@ -303,7 +271,7 @@ The commands below assume:
 results/Recovery/classification_results
 ```
 
-as the result root (the value of `RESULT_PATH` in `paths.py`).
+as the result root (the value of `RESULT_PATH` in `configuration_files/paths.py`).
 
 ---
 
@@ -316,7 +284,7 @@ The main required argument is `--modality`.
 ### 8.1 Feature-fusion model
 
 ```bash
-python eval.py --modality feature-fusion
+python -m scripts.eval --modality feature-fusion
 ```
 
 The model receives both clean text and clean images.
@@ -330,7 +298,7 @@ feature-fusion|clean
 ### 8.2 Text model
 
 ```bash
-python eval.py --modality text
+python -m scripts.eval --modality text
 ```
 
 The model receives only clean text.
@@ -344,7 +312,7 @@ text|clean
 ### 8.3 Image model
 
 ```bash
-python eval.py --modality image
+python -m scripts.eval --modality image
 ```
 
 The model receives only clean images.
@@ -360,7 +328,7 @@ image|clean
 `eval.py` accepts `late-fusion` and one aggregation mode:
 
 ```bash
-python eval.py --modality late-fusion --late_fusion_mode mean
+python -m scripts.eval --modality late-fusion --late_fusion_mode mean
 ```
 
 Available modes:
@@ -392,7 +360,7 @@ max
 | `--use_lora` | `bool` | Whether LoRA is enabled |
 | `--set_params` | `bool` | Whether model parameters are configured automatically |
 | `--results_path` | `str` | Root directory for results |
-| `--dataset` | `str` | Dataset discovered from `my_datasets.py` |
+| `--dataset` | `str` | Dataset discovered from `data_loading/my_datasets.py` |
 
 Clean evaluation creates:
 
@@ -433,7 +401,7 @@ clean/text/parameters.json
 Run:
 
 ```bash
-python attacks/text_attack.py
+python -m attacks.unimodal.text_attack
 ```
 
 The script:
@@ -482,7 +450,7 @@ clean/image/parameters.json
 Run:
 
 ```bash
-python attacks/image_attack.py
+python -m attacks.unimodal.image_attack
 ```
 
 The script applies PGD to the image model and evaluates it on perturbed images.
@@ -523,7 +491,7 @@ clean/feature-fusion/parameters.json
 Run:
 
 ```bash
-python attacks/multimodal_attack.py
+python -m attacks.multimodal.multimodal_attack
 ```
 
 For each attacked sample, the script generates both a text perturbation and an image perturbation.
@@ -580,7 +548,7 @@ perturbed/image/parameters.json
 Run:
 
 ```bash
-python late_fusion_perturbation.py
+python -m scripts.late_fusion_perturbation
 ```
 
 The script creates:
@@ -605,7 +573,7 @@ late-fusion-max|biperturbed
 - the image score is produced from a perturbed image;
 - the two scores are subsequently aggregated.
 
-Input and output paths are read from `paths.py` (`PERT_BASE`, `PER_TEXT_CSV`, etc.). To change the result root, update `RESULT_PATH` in `paths.py`.
+Input and output paths are read from `configuration_files/paths.py` (`PERT_BASE`, `PER_TEXT_CSV`, etc.). To change the result root, update `RESULT_PATH` in `configuration_files/paths.py`.
 
 ---
 
@@ -618,39 +586,39 @@ Use `metrics.py` to compute metrics, save `metrics.json`, create a confusion mat
 Clean:
 
 ```bash
-python metrics.py --type clean --modality feature-fusion
+python -m scripts.metrics --type clean --modality feature-fusion
 ```
 
 Both modalities perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type biperturbed
 ```
 
 Only text perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type text-perturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type text-perturbed
 ```
 
 Only image perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type image-perturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type image-perturbed
 ```
 
 ### Text model
 
 ```bash
-python metrics.py --type clean --modality text
-python metrics.py --type perturbed --modality text
+python -m scripts.metrics --type clean --modality text
+python -m scripts.metrics --type perturbed --modality text
 ```
 
 ### Image model
 
 ```bash
-python metrics.py --type clean --modality image
-python metrics.py --type perturbed --modality image
+python -m scripts.metrics --type clean --modality image
+python -m scripts.metrics --type perturbed --modality image
 ```
 
 ### Late fusion
@@ -658,17 +626,17 @@ python metrics.py --type perturbed --modality image
 Clean:
 
 ```bash
-python metrics.py --type clean --modality late-fusion --mode mean
-python metrics.py --type clean --modality late-fusion --mode min
-python metrics.py --type clean --modality late-fusion --mode max
+python -m scripts.metrics --type clean --modality late-fusion --mode mean
+python -m scripts.metrics --type clean --modality late-fusion --mode min
+python -m scripts.metrics --type clean --modality late-fusion --mode max
 ```
 
 Perturbed:
 
 ```bash
-python metrics.py --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
-python metrics.py --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
-python metrics.py --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
 ```
 
 Each configuration produces:
@@ -688,7 +656,7 @@ scores = 1 - scores
 
 This makes the fake-news class (label 0) the positive class for precision, recall, F1, and ROC/AUC.
 
-The result root is `RESULT_PATH` from `paths.py` (`results/Recovery/classification_results`).
+The result root is `RESULT_PATH` from `configuration_files/paths.py` (`results/Recovery/classification_results`).
 
 ---
 
@@ -697,7 +665,7 @@ The result root is `RESULT_PATH` from `paths.py` (`results/Recovery/classificati
 Run:
 
 ```bash
-python create_rocs_plots.py
+python -m scripts.create_rocs_plots
 ```
 
 The script repeatedly invokes `metrics.py` and builds four comparison groups:
@@ -733,25 +701,25 @@ For a complete ReCOVery experiment, use the following order.
 ### Step 1: generate clean predictions
 
 ```bash
-python eval.py --modality feature-fusion
-python eval.py --modality text
-python eval.py --modality image
+python -m scripts.eval --modality feature-fusion
+python -m scripts.eval --modality text
+python -m scripts.eval --modality image
 ```
 
 Optionally create the clean late-fusion configurations:
 
 ```bash
-python eval.py --modality late-fusion --late_fusion_mode mean
-python eval.py --modality late-fusion --late_fusion_mode min
-python eval.py --modality late-fusion --late_fusion_mode max
+python -m scripts.eval --modality late-fusion --late_fusion_mode mean
+python -m scripts.eval --modality late-fusion --late_fusion_mode min
+python -m scripts.eval --modality late-fusion --late_fusion_mode max
 ```
 
 ### Step 2: generate adversarial predictions
 
 ```bash
-python attacks/multimodal_attack.py
-python attacks/text_attack.py
-python attacks/image_attack.py
+python -m attacks.multimodal.multimodal_attack
+python -m attacks.unimodal.text_attack
+python -m attacks.unimodal.image_attack
 ```
 
 ### Step 3: organize feature-fusion outputs
@@ -783,13 +751,13 @@ perturbed/feature-fusion/image-perturbed/perturbed_results.csv
 ### Step 4: construct perturbed late fusion
 
 ```bash
-python late_fusion_perturbation.py
+python -m scripts.late_fusion_perturbation
 ```
 
 ### Step 5: compute metrics and generate ROC curves
 
 ```bash
-python create_rocs_plots.py
+python -m scripts.create_rocs_plots
 ```
 
 ---
@@ -801,52 +769,52 @@ The complete pipeline does not need to be executed for every experiment.
 ### Clean feature fusion only
 
 ```bash
-python eval.py --modality feature-fusion
-python metrics.py --type clean --modality feature-fusion
+python -m scripts.eval --modality feature-fusion
+python -m scripts.metrics --type clean --modality feature-fusion
 ```
 
 ### Text robustness only
 
 ```bash
-python eval.py --modality text
-python attacks/text_attack.py
-python metrics.py --type clean --modality text
-python metrics.py --type perturbed --modality text
+python -m scripts.eval --modality text
+python -m attacks.unimodal.text_attack
+python -m scripts.metrics --type clean --modality text
+python -m scripts.metrics --type perturbed --modality text
 ```
 
 ### Image robustness only
 
 ```bash
-python eval.py --modality image
-python attacks/image_attack.py
-python metrics.py --type clean --modality image
-python metrics.py --type perturbed --modality image
+python -m scripts.eval --modality image
+python -m attacks.unimodal.image_attack
+python -m scripts.metrics --type clean --modality image
+python -m scripts.metrics --type perturbed --modality image
 ```
 
 ### Compare feature-fusion input conditions
 
 ```bash
-python eval.py --modality feature-fusion
-python attacks/multimodal_attack.py
+python -m scripts.eval --modality feature-fusion
+python -m attacks.multimodal.multimodal_attack
 
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type biperturbed
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type text-perturbed
-python metrics.py --type perturbed --modality feature-fusion --perturbation_type image-perturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type text-perturbed
+python -m scripts.metrics --type perturbed --modality feature-fusion --perturbation_type image-perturbed
 ```
 
 ### Perturbed late fusion only
 
 ```bash
-python eval.py --modality text
-python eval.py --modality image
+python -m scripts.eval --modality text
+python -m scripts.eval --modality image
 
-python attacks/text_attack.py
-python attacks/image_attack.py
-python late_fusion_perturbation.py
+python -m attacks.unimodal.text_attack
+python -m attacks.unimodal.image_attack
+python -m scripts.late_fusion_perturbation
 
-python metrics.py --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
-python metrics.py --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
-python metrics.py --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode mean --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode min  --perturbation_type biperturbed
+python -m scripts.metrics --type perturbed --modality late-fusion --mode max  --perturbation_type biperturbed
 ```
 
 ---
@@ -910,7 +878,7 @@ perturbed/feature-fusion/image-perturbed/perturbed_results.csv
 
 Check:
 
-- `RESULT_PATH` in `paths.py` (the canonical result root);
+- `RESULT_PATH` in `configuration_files/paths.py` (the canonical result root);
 - `--results_path` CLI argument (defaults to `RESULT_PATH`).
 
 ### The test annotation file is not found
@@ -918,7 +886,7 @@ Check:
 Ensure that this pattern matches an existing file:
 
 ```text
-data/<DatasetName>/test.*
+data_loading/<DatasetName>/test.*
 ```
 
 ### TrePAT setup fails

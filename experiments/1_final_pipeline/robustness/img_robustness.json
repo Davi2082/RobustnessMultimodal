@@ -1,7 +1,0 @@
-{
-    "accuracy_on_clean": 0.908,
-    "accuracy_on_corrupted": 0.145,
-    "delta_accuracy": 0.763,
-    "flip_rate": 0.806,
-    "attack_success_rate": 0.864
-}

@@ -1,7 +1,0 @@
-{
-  "accuracy": 0.837,
-  "precision": 0.954,
-  "recall": 0.852,
-  "f1": 0.9,
-  "macro_f1": 0.733
-}

@@ -6,8 +6,10 @@ _*
 
 # Dirs
 data_perturbed/
-data/Recovery/images/
+data_loading/Fakeddit/images/
+data_loading/Recovery/images/
 results/
-model/
+models/
 logs/
 figures/
+venv/

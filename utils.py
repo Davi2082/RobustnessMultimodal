@@ -28,14 +28,14 @@ from tqdm import tqdm
 
 
 # Custom modules
-import my_datasets
+from data_loading import my_datasets
 
-from themis_model import get_Themis
-from trepat.rephraser import Rephraser
-from trepat.modifier import Modifier
-from configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE, MAX_VARIANTS
-from paths import ROC_SETS_DIR, ROC_PLOTS_DIR
-import bertattack as bert_attack
+from models.themis_model import get_Themis
+from attacks.trepat.rephraser import Rephraser
+from attacks.trepat.modifier import Modifier
+from configuration_files.configuration import SOURCE_LABEL, TARGET_LABEL, FF_WEIGHTS_PATH, FF_NAME_IMG_EMBED, MAX_CHANGE_RATIO, USE_BPE, MAX_VARIANTS
+from configuration_files.paths import ROC_SETS_DIR, ROC_PLOTS_DIR
+from attacks import bertattack as bert_attack
 
 # Utilities for logging
 def info(msg):
@@ -55,7 +55,7 @@ def cleanup_cuda(*objs):
 
 def load_available_datasets():
     # Get available datasets from Data directory
-    available_datasets = [d for d in os.listdir("data") if os.path.isdir(os.path.join("data", d))]
+    available_datasets = [d for d in os.listdir("data_loading") if os.path.isdir(os.path.join("data_loading", d)) and not d.startswith((".", "_"))]
     # Create mappings dynamically
     dataset_classes = {}
     load_functions = {}
@@ -171,7 +171,7 @@ class BertAttackThemisWrapper(torch.nn.Module):
         # classe 0 = 1 - p, classe 1 = p
         logits = torch.cat((1 - outputs, outputs), dim=1)
 
-        # compatibilità con HuggingFace style: model(...)[0]
+        # Compatibility with Hugging Face style: model(...)[0]
         return (logits,)
 
 class BertAttackTextOnlyWrapper(torch.nn.Module):
@@ -741,7 +741,8 @@ def save_perturbed_texts(out_dir, rows):
 def load_model(device, args, correct_model_path=None):
     if args.modality == "feature-fusion" or args.modality == "intermediate-fusion":
         args.name_img_embed = FF_NAME_IMG_EMBED
-        args.model_path = FF_WEIGHTS_PATH
+        if args.model_path is None:
+            args.model_path = FF_WEIGHTS_PATH
 
     if args.merge_tokens == 0:
         args.merge_tokens = None
@@ -1346,8 +1347,8 @@ def compute_threshold(model, processor, tokenizer, device, args, model2=None, mo
         args.n_tokens,
         processor,
         tokenizer,
-        glob.glob(f"data/{args.dataset}/val_augmented.*")[0],
-        f"data/{args.dataset}/images",
+        glob.glob(f"data_loading/{args.dataset}/val_augmented.*")[0],
+        f"data_loading/{args.dataset}/images",
     )
     
     dataloader_val = DataLoader(
