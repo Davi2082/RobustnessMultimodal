@@ -14,12 +14,14 @@ from PIL import Image
 from tqdm import tqdm
 
 # Custom imports
+from attacks.attack_algorithms.img.PGD.pgd import img_perturbation
+from attacks.attack_algorithms.text.BERTATTACK.attack import (
+    bertattack as bertattack_attack,
+)
+from attacks.attack_algorithms.text.TREPAT.attack import trepat_attack
 from utils import (
     load_model,
     use_model,
-    img_perturbation,
-    bertattack as bertattack_attack,
-    trepat_attack,
     load_available_datasets,
     save_predictions,
     save_perturbed_texts,
@@ -41,7 +43,7 @@ from configuration_files.configuration import (
 )
 from configuration_files.paths import RESULT_PATH, CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT
 from data_loading import my_datasets
-from attacks.trepat.rephraser import Rephraser
+from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
 
 # Main evaluation function
 def main():
@@ -74,6 +76,8 @@ def main():
     parser.add_argument("--use_lora", type=bool, default=parameters["Use LoRA"])
     parser.add_argument("--dataset", type=str, default=parameters["Dataset"])
     parser.add_argument("--set_params", type=bool, default=False)
+    parser.add_argument("--targeted", action="store_true",
+                        help="Attack only source-label samples; default is untargeted.")
     parser.add_argument("--source_label", type=int, default=SOURCE_LABEL, choices=(0,1))
     parser.add_argument("--target_label", type=int, default=TARGET_LABEL, choices=(0,1))
     parser.add_argument("--results_path", type=str, default=RESULT_PATH)
@@ -155,12 +159,22 @@ def main():
                 "txt": dataset_test.texts[indices[i].item()],
                 "img": Image.open(os.path.join(dataset_test.img_dir, dataset_test.imgs_path[indices[i].item()])).convert("RGB"),
             }
-            # Only consider correctly classified samples
-            if label == args.source_label:
+            # Untargeted by default: attack whatever the model gets right,
+            # pushing each sample toward the class opposite to its own.
+            if args.targeted:
+                should_attack = label == args.source_label
+                source_label, target_label = args.source_label, args.target_label
+            else:
+                should_attack = True
+                source_label, target_label = label, 1 - label
+
+            if should_attack:
                 # Text perturbation
                 with torch.no_grad():
                     if args.attack_method == "trepat":
-                        news_txt_per, txt_similarity = trepat_attack(model, tokenizer, processor, args, news, label, device, trepat_rephraser)
+                        news_txt_per, txt_similarity = trepat_attack(
+                            model, tokenizer, processor, args, news, label, device,
+                            trepat_rephraser, source_label, target_label)
                     else:
                         news_txt_per, txt_similarity = bertattack_attack(model, tokenizer, processor, args, news, label, device, bertattack_tokenizer, bertattack_mlm, device_mlm)
                 torch.cuda.empty_cache()
@@ -212,7 +226,8 @@ def main():
 
     # Save "Parameters" in a file
     attack_parameters = {
-        "Source Label": args.source_label,
+        "Targeted": args.targeted,
+        "Source Label": (args.source_label if args.targeted else "all (per-sample 1-label)"),
         "Target Label": args.target_label,
         "K (BERT Attack)": args.k,
         "Threshold Pred Score": args.threshold_pred_score,

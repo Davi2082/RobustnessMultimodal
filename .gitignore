@@ -9,7 +9,7 @@ data_perturbed/
 data_loading/Fakeddit/images/
 data_loading/Recovery/images/
 results/
-models/
+models/weights/
 logs/
 figures/
 venv/

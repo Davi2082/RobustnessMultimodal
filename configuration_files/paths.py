@@ -102,3 +102,32 @@ def late_fusion_result_path(
         late_fusion_directory_name(fusion),
     )
     return late_fusion_scenario_path(fusion_dir, attack_scope)
+
+
+# Annotations and images are split across two roots on this branch; resolve
+# either so no driver has to guess which one holds a given dataset.
+DATASET_ROOTS = ("data", "data_loading")
+
+
+def dataset_images_dir(dataset):
+    """Image directory of a dataset, whichever root holds it."""
+    for root in DATASET_ROOTS:
+        candidate = os.path.join(root, dataset, "images")
+        if os.path.isdir(candidate):
+            return candidate
+    raise FileNotFoundError(
+        f"No images directory for {dataset} under {' or '.join(DATASET_ROOTS)}"
+    )
+
+
+def dataset_annotations(dataset, split="test"):
+    """Annotation file of one split, whichever root holds it."""
+    import glob as _glob
+
+    for root in DATASET_ROOTS:
+        matches = sorted(_glob.glob(os.path.join(root, dataset, f"{split}.*")))
+        if matches:
+            return matches[0]
+    raise FileNotFoundError(
+        f"No {split} annotations for {dataset} under {' or '.join(DATASET_ROOTS)}"
+    )

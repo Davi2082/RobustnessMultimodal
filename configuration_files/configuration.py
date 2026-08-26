@@ -10,11 +10,17 @@ TEXT_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-p
 IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 FF_NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
+# Image-only branch trained on the same encoder as the feature-fusion model,
+# so late fusion can be compared against it on equal footing.
+B32_IMAGE_WEIGHTS_PATH = os.path.join(
+    "models", "weights", DATASET,
+    "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt",
+)
 
 # CUDA devices
 DEVICE = "cuda:0"      # main model (eval + attacks)
 DEVICE_EVAL = "cuda:0" # clean eval
-DEVICE_MLM = "cuda:1"  # BERT MLM (text/multimodal attacks only)
+DEVICE_MLM = "cuda:0"  # TREPAT rewriter / BERT MLM (text attacks only)
 
 # Model parameters
 BATCH_SIZE = 128
@@ -28,11 +34,13 @@ SUBSET_SIZE = None
 SOURCE_LABEL = 0 # Fake
 TARGET_LABEL = 1 # Real
 ## Image attack parameters
-PGD_ITERS = 20
-EPSILON = 8 / 255
-ALPHA_FACTOR = 0.01
+PGD_ITERS = 50   # paper: 50 steps
+EPSILON = 16 / 255  # paper: eps = 16/255
+ALPHA_FACTOR = 0.4  # alpha = eps/(iters*factor) = 0.8/255, the paper's step size
 ## TrePat attack parameters (matched to Przybyła et al. 2025, arXiv:2410.20940 final-evaluation config)
-ATTACK_MODEL = "OLMO7B" # paper's chosen LLM ("we have decided to use OLMO due to its open and transparent features")
+ATTACK_MODEL = "LLAMA3B" # meta-llama/Llama-3.2-3B-Instruct, as reported in the paper.
+                        # TrePat's own paper used OLMo; switching rewriters changes
+                        # every TrePat result, so runs must not be mixed across models.
 COMMAND = "INFORMAL" # paper's best prompt for journalistic/news text (their HN task): "INFORMAL rephrasing for text from journalistic ... sources"
                    # options: "REPHRASE": "Rephrase the provided input text.",
                    # "PARAPHRASE": "Paraphrase the provided input text.",

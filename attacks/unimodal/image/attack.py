@@ -13,11 +13,11 @@ from PIL import Image
 from tqdm import tqdm
 
 # Custom imports
+from attacks.attack_algorithms.img.PGD.pgd import img_perturbation
+from attacks.attack_algorithms.text.BERTATTACK.attack import bertattack
 from utils import (
     load_model,
     use_model,
-    img_perturbation,
-    bertattack,
     load_available_datasets,
     save_predictions,
     save_perturbed_image,
@@ -61,6 +61,8 @@ def main():
     parser.add_argument("--use_lora", type=bool, default=parameters["Use LoRA"])
     parser.add_argument("--dataset", type=str, default=parameters["Dataset"])
     parser.add_argument("--set_params", type=bool, default=False)
+    parser.add_argument("--targeted", action="store_true",
+                        help="Attack only source-label samples; default is untargeted.")
     parser.add_argument("--source_label", type=int, default=SOURCE_LABEL, choices=(0,1))
     parser.add_argument("--target_label", type=int, default=TARGET_LABEL, choices=(0,1))
     parser.add_argument("--pgd_iters", type=int, default=PGD_ITERS)
@@ -121,8 +123,16 @@ def main():
                 "txt": dataset_test.texts[indices[i].item()],
                 "img": Image.open(os.path.join(dataset_test.img_dir, dataset_test.imgs_path[indices[i].item()])).convert("RGB"),
             }
-            # Only consider correctly classified samples
-            if label == args.source_label:
+            # Untargeted by default: attack whatever the model gets right,
+            # pushing each sample toward the class opposite to its own.
+            if args.targeted:
+                should_attack = label == args.source_label
+                source_label, target_label = args.source_label, args.target_label
+            else:
+                should_attack = True
+                source_label, target_label = label, 1 - label
+
+            if should_attack:
                 # Image perturbation
                 news_img_per, ssim_pgd, proccess_img = img_perturbation(model, tokenizer, processor, args, news, torch.tensor([label], device=device))
                 img_per = news_img_per["img"]
@@ -166,7 +176,8 @@ def main():
     
     # Save "Parameters" in a file
     attack_parameters = {
-        "Source Label": args.source_label,
+        "Targeted": args.targeted,
+        "Source Label": (args.source_label if args.targeted else "all (per-sample 1-label)"),
         "Target Label": args.target_label,
         "PGD Iters": args.pgd_iters,
         "Epsilon": args.epsilon,

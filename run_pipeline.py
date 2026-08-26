@@ -71,8 +71,8 @@ def build_experiments(dataset, model_type):
         clean_params = results / "clean" / "text" / "parameters.json"
         return (
             experiment("clean", "scripts.eval", "--modality", "text", "--model_path", str(model), *model_options, *common),
-            experiment("trepat", "attacks.unimodal.text_attack", "--attack_method", "trepat", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "trepat", *common),
-            experiment("hotflip", "attacks.unimodal.text_attack", "--attack_method", "bertattack", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "hotflip", *common),
+            experiment("trepat", "attacks.unimodal.text.attack", "--attack_method", "trepat", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "trepat", *common),
+            experiment("hotflip", "attacks.unimodal.text.attack", "--attack_method", "bertattack", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "hotflip", *common),
         )
     if model_type == "image":
         model = find_checkpoint(dataset, "image")
@@ -80,20 +80,23 @@ def build_experiments(dataset, model_type):
         clean_params = results / "clean" / "image" / "parameters.json"
         return (
             experiment("clean", "scripts.eval", "--modality", "image", "--model_path", str(model), *model_options, *common),
-            experiment("pgd", "attacks.unimodal.image_attack", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "pgd", *common),
+            experiment("pgd", "attacks.unimodal.image.attack", "--model_path", str(model), "--parameters-path", str(clean_params), "--experiment-name", "pgd", *common),
         )
     if model_type == "feature-fusion":
         model = find_checkpoint(dataset, "feature-fusion")
         model_options = checkpoint_options(model)
         clean_params = results / "clean" / "feature-fusion" / "parameters.json"
-        attack = ("attacks.multimodal.multimodal_attack", "--model_path", str(model), "--parameters-path", str(clean_params), *common)
+        attack = ("attacks.multimodal.sum.attack", "--fusion", "feature-fusion",
+                  "--text-parameters", str(clean_params), "--image-parameters", str(clean_params), *common)
         return (
             experiment("clean", "scripts.eval", "--modality", "feature-fusion", "--model_path", str(model), *model_options, *common),
             experiment("pgd", attack[0], *attack[1:], "--attack-scope", "image", "--experiment-name", "pgd"),
-            experiment("trepat", attack[0], *attack[1:], "--attack-scope", "text", "--text-attack", "trepat", "--experiment-name", "trepat"),
-            experiment("pgd-trepat-sum", attack[0], *attack[1:], "--attack-scope", "both", "--optimization", "sum", "--text-attack", "trepat", "--experiment-name", "pgd-trepat-sum"),
-            experiment("pgd-trepat-alternating", attack[0], *attack[1:], "--attack-scope", "both", "--optimization", "alternating", "--text-attack", "trepat", "--experiment-name", "pgd-trepat-alternating"),
-            experiment("hotflip-pgd-joint", attack[0], *attack[1:], "--attack-scope", "both", "--optimization", "alternating", "--text-attack", "hotflip", "--experiment-name", "hotflip-pgd-joint"),
+            experiment("trepat", attack[0], *attack[1:], "--attack-scope", "text", "--experiment-name", "trepat"),
+            experiment("pgd-trepat-sum", attack[0], *attack[1:], "--attack-scope", "both", "--optimization", "sum", "--experiment-name", "pgd-trepat-sum"),
+            experiment("pgd-trepat-alternating", attack[0], *attack[1:], "--attack-scope", "both", "--optimization", "interleaved", "--experiment-name", "pgd-trepat-alternating"),
+            experiment("hotflip-pgd-joint", "attacks.multimodal.joint.attack", "--fusion", "feature-fusion",
+                       "--text-parameters", str(clean_params), "--image-parameters", str(clean_params),
+                       "--attack-scope", "both", *common),
         )
     fusion = model_type.removeprefix("late-fusion-")
     text_model = find_checkpoint(dataset, "text")
@@ -107,9 +110,9 @@ def build_experiments(dataset, model_type):
         experiment("setup-clean-text", "scripts.eval", "--modality", "text", "--model_path", str(text_model), *text_options, *common),
         experiment("setup-clean-image", "scripts.eval", "--modality", "image", "--model_path", str(image_model), *image_options, *common),
         experiment("clean", "scripts.eval", "--modality", "late-fusion", "--late_fusion_mode", fusion, "--text_model_path", str(text_model), "--image_model_path", str(image_model), *image_options, *common),
-        experiment("pgd", "scripts.late_fusion_perturbation", *late_common, "--attack-scope", "image"),
-        experiment("trepat", "scripts.late_fusion_perturbation", *late_common, "--attack-scope", "text"),
-        experiment("pgd-trepat-sum", "scripts.late_fusion_perturbation", *late_common, "--attack-scope", "both"),
+        experiment("pgd", "attacks.multimodal.sum.attack", *late_common, "--attack-scope", "image"),
+        experiment("trepat", "attacks.multimodal.sum.attack", *late_common, "--attack-scope", "text"),
+        experiment("pgd-trepat-sum", "attacks.multimodal.sum.attack", *late_common, "--attack-scope", "both"),
     )
 
 

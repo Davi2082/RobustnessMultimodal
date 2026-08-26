@@ -81,6 +81,8 @@ from configuration_files.configuration import (
     late_fusion_attack_budgets,
 )
 from configuration_files.paths import (
+    dataset_annotations,
+    dataset_images_dir,
     CLEAN_IMAGE_PARAMS,
     CLEAN_TEXT_PARAMS,
     LATE_FUSION_DATA_DIR,
@@ -88,34 +90,39 @@ from configuration_files.paths import (
     TRAIN_SVM_MODEL,
     late_fusion_scenario_path,
 )
-from attacks.trepat.modifier import Modifier
-from attacks.trepat.rephraser import Rephraser
-from utils import (
-    TargetedTrepatAttacker,
-    bertattack as bertattack_attack,
+from attacks.attack_algorithms.text.TREPAT.modifier import Modifier
+from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
+from attacks.attack_algorithms.img.PGD.pgd import (
     img_perturbation,
+    project_to_epsilon_ball,
+)
+from attacks.attack_algorithms.text.BERTATTACK.attack import (
+    bertattack as bertattack_attack,
+)
+from attacks.attack_algorithms.text.TREPAT.attack import TargetedTrepatAttacker
+from attacks.attack_algorithms.text.common import model_sbert, visible_text_window
+from models.fusion import (
+    COMPONENT_OUTPUT_COLUMNS,
+    LEARNED_RULES,
+    fusion_head_path,
+    PARAMETER_KEYS,
+    COMPONENT_OUTPUT_NAMES,
+    FUSION_CHOICES,
+    DifferentiableRBFSVMFusion,
+    LateFusionClassifier,
+    build_classifier,
+    model_args_from_parameters,
+    read_parameters,
+)
+from utils import (
     load_available_datasets,
     load_model,
-    model_sbert,
     save_perturbed_image,
     save_perturbed_texts,
     save_predictions,
-    visible_text_window,
 )
 
 
-PARAMETER_KEYS = {
-    "Name LLM",
-    "Image Embedder Name",
-    "Model Path",
-    "Number of Tokens",
-    "Merge Tokens",
-    "LoRA Alpha",
-    "LoRA R",
-    "LoRA Dropout",
-    "Use LoRA",
-    "Dataset",
-}
 
 COMPONENT_OUTPUT_NAMES = (
     "text_scores",
@@ -126,29 +133,6 @@ COMPONENT_OUTPUT_NAMES = (
 COMPONENT_OUTPUT_COLUMNS = tuple(name[:-1] for name in COMPONENT_OUTPUT_NAMES)
 
 
-def read_parameters(path: Path, description: str) -> dict[str, Any]:
-    """Read and validate one clean-model parameter file."""
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            parameters = json.load(handle)
-    except FileNotFoundError as error:
-        raise FileNotFoundError(
-            f"{description} parameters do not exist: {path}. "
-            "Run the clean unimodal evaluation first."
-        ) from error
-    except json.JSONDecodeError as error:
-        raise ValueError(
-            f"Invalid JSON in {description} parameters: {path}"
-        ) from error
-
-    missing = PARAMETER_KEYS.difference(parameters)
-    if missing:
-        raise ValueError(
-            f"{description} parameters are missing: "
-            f"{', '.join(sorted(missing))}"
-        )
-
-    return parameters
 
 
 def parse_args() -> tuple[
@@ -194,7 +178,7 @@ def parse_args() -> tuple[
     model_group = parser.add_argument_group("late-fusion classifier")
     model_group.add_argument(
         "--fusion",
-        choices=("mean", "min", "max", "svm-rbf", "svm_rbf"),
+        choices=FUSION_CHOICES + ("svm_rbf",),
         default="mean",
     )
     model_group.add_argument(
@@ -320,6 +304,26 @@ def parse_args() -> tuple[
 
     attack_group = parser.add_argument_group("attack")
     attack_group.add_argument(
+        "--optimization",
+        choices=("sum", "interleaved"),
+        default="sum",
+        help=(
+            "How a two-modality attack spends its budget. 'sum' gives each "
+            "channel its whole budget in one pass against a clean partner. "
+            "'interleaved' alternates one PGD iteration and one TREPAT variant "
+            "at a time, so the channels see each other, for the same total."
+        ),
+    )
+    attack_group.add_argument(
+        "--targeted",
+        action="store_true",
+        help=(
+            "Attack only source-label samples and push them to the target "
+            "label. Default is untargeted: every correctly classified sample "
+            "is pushed toward the class opposite to its own."
+        ),
+    )
+    attack_group.add_argument(
         "--attack-scope",
         "--attack_scope",
         dest="attack_scope",
@@ -433,6 +437,14 @@ def parse_args() -> tuple[
     if args.max_variants is None:
         args.max_variants = default_budgets["max_variants"]
 
+    # Interleaving changes the order in which the budget is spent, never its
+    # size: one unit of each channel per step until both budgets are exhausted.
+    args.total_steps = (
+        1
+        if args.optimization == "sum"
+        else max(args.pgd_iters, args.max_variants)
+    )
+
     return args, text_parameters, image_parameters
 
 
@@ -518,14 +530,16 @@ def validate_args(
             f"{args.image_model_path}"
         )
 
-    if (
-        args.fusion == "svm-rbf"
-        and not args.svm_model.is_file()
-    ):
-        raise FileNotFoundError(
-            f"RBF-SVM model does not exist: "
-            f"{args.svm_model}"
-        )
+    # Learned rules are attacked through the head persisted by
+    # scripts/fit_fusion_heads.py, so clean and adversarial rows describe the
+    # same classifier.
+    if args.fusion in LEARNED_RULES:
+        head = fusion_head_path(args.fusion)
+        if not os.path.exists(head):
+            raise FileNotFoundError(
+                f"No fitted {args.fusion} head at {head}. "
+                "Run: python3 -m scripts.fit_fusion_heads"
+            )
 
     text_dataset = text_parameters["Dataset"]
     image_dataset = image_parameters["Dataset"]
@@ -544,526 +558,10 @@ def validate_args(
         )
 
 
-def model_args_from_parameters(
-    parameters: dict[str, Any],
-    modality: str,
-    model_path: Path,
-) -> argparse.Namespace:
-    """Build exactly the namespace expected by ``utils.load_model``."""
-    return argparse.Namespace(
-        modality=modality,
-        name_llm=parameters["Name LLM"],
-        name_img_embed=parameters["Image Embedder Name"],
-        model_path=str(model_path),
-        n_tokens=int(parameters["Number of Tokens"]),
-        merge_tokens=parameters["Merge Tokens"],
-        lora_alpha=parameters["LoRA Alpha"],
-        lora_r=parameters["LoRA R"],
-        lora_dropout=parameters["LoRA Dropout"],
-        use_lora=parameters["Use LoRA"],
-        set_params=False,
-    )
 
 
-class DifferentiableRBFSVMFusion(torch.nn.Module):
-    """Differentiable binary StandardScaler + RBF-SVC probability model."""
 
-    def __init__(self, fitted_model: Any):
-        super().__init__()
 
-        scaler: StandardScaler | None = None
-        svc: SVC
-
-        if isinstance(fitted_model, Pipeline):
-            steps = list(fitted_model.steps)
-
-            if (
-                not steps
-                or not isinstance(steps[-1][1], SVC)
-            ):
-                raise TypeError(
-                    "The final SVM pipeline step must be "
-                    "sklearn.svm.SVC"
-                )
-
-            svc = steps[-1][1]
-            preprocessing = [
-                step
-                for _, step in steps[:-1]
-                if step != "passthrough"
-            ]
-
-            if (
-                len(preprocessing) > 1
-                or (
-                    preprocessing
-                    and not isinstance(
-                        preprocessing[0],
-                        StandardScaler,
-                    )
-                )
-            ):
-                raise TypeError(
-                    "Differentiable SVM fusion supports only an "
-                    "optional StandardScaler before SVC"
-                )
-
-            if preprocessing:
-                scaler = preprocessing[0]
-
-        elif isinstance(fitted_model, SVC):
-            svc = fitted_model
-
-        else:
-            raise TypeError(
-                "--svm-model must contain an SVC or a "
-                "Pipeline ending in SVC"
-            )
-
-        if svc.kernel != "rbf":
-            raise ValueError(
-                f"Expected an RBF SVC, got kernel={svc.kernel!r}"
-            )
-
-        if not getattr(svc, "probability", False):
-            raise ValueError(
-                "The SVC must have been trained with probability=True"
-            )
-
-        if getattr(svc, "n_features_in_", None) != 2:
-            raise ValueError(
-                "The SVC must use exactly [text, image] "
-                "as its two features"
-            )
-
-        if (
-            len(svc.classes_) != 2
-            or 1 not in svc.classes_
-        ):
-            raise ValueError(
-                "The SVC must be binary and contain class 1; "
-                f"got {svc.classes_}"
-            )
-
-        if (
-            len(svc.probA_) != 1
-            or len(svc.probB_) != 1
-        ):
-            raise ValueError(
-                "The fitted SVC does not contain binary "
-                "probability calibration"
-            )
-
-        if scaler is None:
-            mean = np.zeros(
-                2,
-                dtype=np.float32,
-            )
-            scale = np.ones(
-                2,
-                dtype=np.float32,
-            )
-        else:
-            if getattr(scaler, "n_features_in_", None) != 2:
-                raise ValueError(
-                    "The StandardScaler must contain exactly "
-                    "two features"
-                )
-
-            mean = (
-                np.asarray(
-                    scaler.mean_,
-                    dtype=np.float32,
-                )
-                if scaler.with_mean
-                else np.zeros(
-                    2,
-                    dtype=np.float32,
-                )
-            )
-            scale = (
-                np.asarray(
-                    scaler.scale_,
-                    dtype=np.float32,
-                )
-                if scaler.with_std
-                else np.ones(
-                    2,
-                    dtype=np.float32,
-                )
-            )
-
-        self.register_buffer(
-            "mean",
-            torch.as_tensor(mean),
-        )
-        self.register_buffer(
-            "scale",
-            torch.as_tensor(scale),
-        )
-        self.register_buffer(
-            "support_vectors",
-            torch.as_tensor(
-                np.asarray(svc.support_vectors_),
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "dual_coef",
-            torch.as_tensor(
-                np.asarray(svc.dual_coef_[0]),
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "intercept",
-            torch.tensor(
-                float(svc.intercept_[0]),
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "gamma",
-            torch.tensor(
-                float(svc._gamma),
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "prob_a",
-            torch.tensor(
-                float(svc.probA_[0]),
-                dtype=torch.float32,
-            ),
-        )
-        self.register_buffer(
-            "prob_b",
-            torch.tensor(
-                float(svc.probB_[0]),
-                dtype=torch.float32,
-            ),
-        )
-
-        # LibSVM's binary calibration orientation is established against the
-        # fitted sklearn model once. This also handles an unusual class order.
-        transformed_points = np.asarray(
-            svc.support_vectors_[
-                : min(
-                    32,
-                    len(svc.support_vectors_),
-                )
-            ]
-        )
-
-        if scaler is not None:
-            raw_points = scaler.inverse_transform(
-                transformed_points
-            )
-        else:
-            raw_points = transformed_points
-
-        decision = np.asarray(
-            fitted_model.decision_function(raw_points)
-        ).reshape(-1)
-
-        calibrated = 1.0 / (
-            1.0
-            + np.exp(
-                np.clip(
-                    (
-                        svc.probA_[0] * decision
-                        + svc.probB_[0]
-                    ),
-                    -80,
-                    80,
-                )
-            )
-        )
-
-        positive_column = int(
-            np.flatnonzero(
-                np.asarray(fitted_model.classes_) == 1
-            )[0]
-        )
-
-        sklearn_probability = fitted_model.predict_proba(
-            raw_points
-        )[:, positive_column]
-
-        direct_error = float(
-            np.mean(
-                np.abs(
-                    calibrated
-                    - sklearn_probability
-                )
-            )
-        )
-        inverse_error = float(
-            np.mean(
-                np.abs(
-                    (1.0 - calibrated)
-                    - sklearn_probability
-                )
-            )
-        )
-
-        self.invert_probability = (
-            inverse_error < direct_error
-        )
-
-        approximation_error = min(
-            direct_error,
-            inverse_error,
-        )
-
-        if approximation_error > 0.05:
-            raise ValueError(
-                "The differentiable SVM probability does not "
-                "match sklearn closely enough "
-                f"(mean absolute error={approximation_error:.4f})"
-            )
-
-    def forward(
-        self,
-        features: torch.Tensor,
-    ) -> torch.Tensor:
-        """Return the differentiable probability of class 1."""
-        features = features.to(
-            dtype=self.support_vectors.dtype
-        )
-
-        transformed = (
-            features - self.mean
-        ) / self.scale
-
-        squared_distance = (
-            transformed.unsqueeze(1)
-            - self.support_vectors.unsqueeze(0)
-        ).square().sum(dim=-1)
-
-        kernel = torch.exp(
-            -self.gamma * squared_distance
-        )
-
-        decision = (
-            kernel.matmul(self.dual_coef)
-            + self.intercept
-        )
-
-        probability = torch.sigmoid(
-            -(
-                self.prob_a * decision
-                + self.prob_b
-            )
-        )
-
-        if self.invert_probability:
-            probability = 1.0 - probability
-
-        return probability
-
-
-class LateFusionClassifier(torch.nn.Module):
-    """Expose two frozen unimodal models and score fusion as one classifier."""
-
-    def __init__(
-        self,
-        text_model: torch.nn.Module,
-        image_model: torch.nn.Module,
-        fusion: str,
-        svm_fusion: DifferentiableRBFSVMFusion | None = None,
-        svm_input: str = "scores",
-    ):
-        super().__init__()
-
-        self.text_model = text_model
-        self.image_model = image_model
-        self.fusion = fusion
-        self.svm_fusion = svm_fusion
-        self.svm_input = svm_input
-
-        if fusion not in {
-            "mean",
-            "min",
-            "max",
-            "svm-rbf",
-        }:
-            raise ValueError(
-                f"Unknown fusion: {fusion}"
-            )
-
-        if (
-            fusion == "svm-rbf"
-            and svm_fusion is None
-        ):
-            raise ValueError(
-                "svm_fusion is required for fusion='svm-rbf'"
-            )
-
-        if svm_input not in {
-            "scores",
-            "logits",
-        }:
-            raise ValueError(
-                f"Unknown SVM input space: {svm_input}"
-            )
-
-        # Parameters stay frozen, while gradients with respect to the input
-        # image remain available to PGD.
-        for parameter in self.text_model.parameters():
-            parameter.requires_grad_(False)
-
-        for parameter in self.image_model.parameters():
-            parameter.requires_grad_(False)
-
-        self.text_model.eval()
-        self.image_model.eval()
-
-    @staticmethod
-    def _vector(
-        value: torch.Tensor,
-        name: str,
-    ) -> torch.Tensor:
-        if not torch.is_tensor(value):
-            raise TypeError(
-                f"{name} must be a tensor"
-            )
-
-        if value.ndim == 0:
-            value = value.unsqueeze(0)
-
-        if (
-            value.ndim > 2
-            or (
-                value.ndim == 2
-                and value.shape[1] != 1
-            )
-        ):
-            raise ValueError(
-                f"{name} must contain one scalar per sample; "
-                f"got {value.shape}"
-            )
-
-        return value.reshape(-1)
-
-    def forward(
-        self,
-        images: Any,
-        texts: Any,
-        return_components: bool = False,
-    ) -> tuple[torch.Tensor, ...]:
-        if images is None or texts is None:
-            raise ValueError(
-                "Late fusion requires both image and text inputs"
-            )
-
-        text_score, text_logit = self.text_model(
-            None,
-            texts,
-        )
-        image_score, image_logit = self.image_model(
-            images,
-            None,
-        )
-
-        text_score = self._vector(
-            text_score,
-            "text score",
-        )
-        image_score = self._vector(
-            image_score,
-            "image score",
-        )
-        text_logit = self._vector(
-            text_logit,
-            "text logit",
-        )
-        image_logit = self._vector(
-            image_logit,
-            "image logit",
-        )
-
-        batch_sizes = {
-            text_score.numel(),
-            image_score.numel(),
-            text_logit.numel(),
-            image_logit.numel(),
-        }
-
-        if len(batch_sizes) != 1:
-            raise ValueError(
-                "Text and image models returned different "
-                "batch sizes: "
-                f"text={text_score.numel()}, "
-                f"image={image_score.numel()}"
-            )
-
-        if self.fusion == "mean":
-            fused_score = 0.5 * (
-                text_score + image_score
-            )
-
-        elif self.fusion == "min":
-            fused_score = torch.minimum(
-                text_score,
-                image_score,
-            )
-
-        elif self.fusion == "max":
-            fused_score = torch.maximum(
-                text_score,
-                image_score,
-            )
-
-        else:
-            if self.svm_input == "scores":
-                features = torch.stack(
-                    (
-                        text_score,
-                        image_score,
-                    ),
-                    dim=1,
-                )
-            else:
-                features = torch.stack(
-                    (
-                        text_logit,
-                        image_logit,
-                    ),
-                    dim=1,
-                )
-
-            fused_score = self.svm_fusion(
-                features
-            )
-
-        # The late-fusion logit is defined consistently from its probability.
-        eps = torch.finfo(
-            fused_score.dtype
-        ).eps
-
-        fused_logit = torch.logit(
-            fused_score.clamp(
-                eps,
-                1.0 - eps,
-            )
-        )
-
-        fused_outputs = (
-            fused_score.unsqueeze(1),
-            fused_logit.unsqueeze(1),
-        )
-
-        if not return_components:
-            return fused_outputs
-
-        return (
-            *fused_outputs,
-            text_score.unsqueeze(1),
-            text_logit.unsqueeze(1),
-            image_score.unsqueeze(1),
-            image_logit.unsqueeze(1),
-        )
 
 
 class LateFusionTrepatVictim:
@@ -1240,11 +738,22 @@ def fusion_trepat_attack(
     news: dict[str, Any],
     device: torch.device,
     rephraser: Rephraser,
+    source_label: int | None = None,
+    target_label: int | None = None,
+    max_variants: int | None = None,
 ) -> tuple[
     dict[str, Any],
     float,
 ]:
-    """Attack text candidates using the fused probability as feedback."""
+    """Attack text candidates using the fused probability as feedback.
+
+    ``source_label``/``target_label`` override the configured pair so an
+    untargeted run can push each sample toward whichever class is not its own.
+    """
+    if source_label is None:
+        source_label = args.source_label
+    if target_label is None:
+        target_label = args.target_label
     visible_text, hidden_text = visible_text_window(
         news["txt"],
         tokenizer,
@@ -1264,13 +773,13 @@ def fusion_trepat_attack(
         rephraser,
         splitter="cascade",
         weak=False,
-        max_variants=args.max_variants,
+        max_variants=(args.max_variants if max_variants is None else max_variants),
     )
 
     attacker = TargetedTrepatAttacker(
         modifier,
-        args.source_label,
-        args.target_label,
+        source_label,
+        target_label,
     )
 
     perturbed_visible = attacker.attack(
@@ -1446,10 +955,27 @@ def save_parameters(
         "Attack": {
             "Objective": "late-fusion score",
             "Independent Modalities": True,
-            "Alternation": False,
+            "Alternation": args.optimization != "sum",
+            "Optimization": args.optimization,
+            "Interleaved Steps": (
+                args.total_steps if args.optimization != "sum" else None
+            ),
             "Method": args.attack_method,
-            "Source Label": args.source_label,
-            "Target Label": args.target_label,
+            # Which LLM produced the TREPAT rewritings; without it a run
+            # cannot be reproduced or compared against another.
+            "TRePAT Model": (
+                ATTACK_MODEL if args.attack_method == "trepat" else None
+            ),
+            "TRePAT Command": (
+                COMMAND if args.attack_method == "trepat" else None
+            ),
+            "Targeted": args.targeted,
+            "Source Label": (
+                args.source_label if args.targeted else "all (per-sample 1-label)"
+            ),
+            "Target Label": (
+                args.target_label if args.targeted else "all (per-sample 1-label)"
+            ),
             "Only Clean-Correct Source Samples": True,
             "Budget Divisor": scope_budgets["divisor"],
             "Budgets Are Effective": True,
@@ -1465,6 +991,13 @@ def save_parameters(
             ),
             "Epsilon": args.epsilon,
             "Alpha Factor": args.alpha_factor,
+            # The step size actually used, so a run can be checked
+            # against the reported configuration without re-deriving it.
+            "Alpha": (
+                args.epsilon / (args.pgd_iters * args.alpha_factor)
+                if args.attack_scope in {"image", "both"}
+                else None
+            ),
             "K (BERT Attack)": args.k,
             "Threshold Pred Score": args.threshold_pred_score,
             "Max Words to Attack": args.max_words_to_attack,
@@ -1511,50 +1044,12 @@ def main() -> None:
     device = torch.device(DEVICE)
     device_mlm = torch.device(DEVICE_MLM)
 
-    text_model_args = model_args_from_parameters(
-        text_parameters,
-        "text",
-        args.text_model_path,
-    )
-
-    image_model_args = model_args_from_parameters(
-        image_parameters,
-        "image",
-        args.image_model_path,
-    )
-
-    text_model, tokenizer, _ = load_model(
-        device,
-        text_model_args,
-        str(args.text_model_path),
-    )
-
-    image_model, _, processor = load_model(
-        device,
-        image_model_args,
-        str(args.image_model_path),
-    )
-
-    svm_fusion = None
-
-    if args.fusion == "svm-rbf":
-        fitted_svm = joblib.load(
-            args.svm_model
-        )
-
-        svm_fusion = DifferentiableRBFSVMFusion(
-            fitted_svm
-        ).to(device)
-
-    model = LateFusionClassifier(
-        text_model=text_model,
-        image_model=image_model,
-        fusion=args.fusion,
-        svm_fusion=svm_fusion,
-        svm_input=args.svm_input,
-    ).to(device)
-
-    model.eval()
+    # Model in: one call covers late fusion (two unimodal checkpoints plus a
+    # rule) and feature fusion (one jointly trained checkpoint), so neither
+    # needs a driver of its own.
+    args.text_parameters_data = text_parameters
+    args.image_parameters_data = image_parameters
+    model, tokenizer, processor = build_classifier(args, device)
 
     # Existing BERTAttack helpers pass the fixed image only for multimodal
     # modalities. The actual two underlying models were already loaded above.
@@ -1607,14 +1102,10 @@ def main() -> None:
             )
         )
 
-        if not candidates:
-            raise FileNotFoundError(
-                f"No data_loading/{args.dataset}/test.* "
-                "file was found"
-            )
-
         test_data = Path(
             candidates[0]
+            if candidates
+            else dataset_annotations(args.dataset, "test")
         )
 
     else:
@@ -1629,9 +1120,7 @@ def main() -> None:
     images_dir = (
         args.images_dir
         if args.images_dir is not None
-        else Path(
-            f"data_loading/{args.dataset}/images"
-        )
+        else Path(dataset_images_dir(args.dataset))
     )
 
     if not images_dir.is_dir():
@@ -1828,121 +1317,169 @@ def main() -> None:
             text_similarity = 1.0
             image_ssim = 1.0
 
-            clean_is_source = (
-                int(
-                    clean_predictions[
-                        position
-                    ].item()
-                )
-                == args.source_label
+            clean_prediction = int(
+                clean_predictions[position].item()
             )
 
-            should_attack = (
-                label == args.source_label
-                and clean_is_source
-            )
+            if args.targeted:
+                # Evasion of one class only: fake news pushed to real.
+                source_label = args.source_label
+                target_label = args.target_label
+                should_attack = (
+                    label == args.source_label
+                    and clean_prediction == args.source_label
+                )
+            else:
+                # Untargeted: every sample the model gets right is pushed
+                # toward the opposite class, so both classes are attacked.
+                source_label = label
+                target_label = 1 - label
+                should_attack = clean_prediction == label
 
             if should_attack:
                 attacked_samples += 1
+                # One round reproduces the disjoint attack, where each
+                # modality is optimised against a clean partner. With more
+                # rounds each channel sees the other's current perturbation,
+                # while the per-round budget is divided so the total spent
+                # matches the single-round run.
+                current_news = dict(clean_news)
+                clean_pixels = None
 
-                # Both calls deliberately receive clean_news. Therefore neither
-                # modality attack observes the perturbation produced for the
-                # other.
-                if args.attack_scope in {
-                    "text",
-                    "both",
-                }:
-                    if args.attack_method == "trepat":
-                        (
-                            text_news,
-                            text_similarity,
-                        ) = fusion_trepat_attack(
-                            model,
-                            tokenizer,
-                            processor,
-                            args,
-                            clean_news,
-                            device,
-                            rephraser,
-                        )
-
-                    else:
-                        with torch.no_grad():
+                # "sum" spends each channel's budget in a single pass against a
+                # clean partner, so the two perturbations never meet until they
+                # are combined. "interleaved" spends the same budget one unit at
+                # a time, alternating channels, so each unit is computed on the
+                # sample the other channel has already perturbed.
+                for step in range(args.total_steps):
+                    text_step = args.optimization == "sum" or step < args.max_variants
+                    image_step = args.optimization == "sum" or step < args.pgd_iters
+                    if text_step and args.attack_scope in {
+                        "text",
+                        "both",
+                    }:
+                        if args.attack_method == "trepat":
                             (
                                 text_news,
                                 text_similarity,
-                            ) = bertattack_attack(
+                            ) = fusion_trepat_attack(
                                 model,
                                 tokenizer,
                                 processor,
                                 args,
-                                clean_news,
-                                label,
+                                current_news,
                                 device,
-                                bertattack_tokenizer,
-                                bertattack_mlm,
-                                device_mlm,
+                                rephraser,
+                                source_label,
+                                target_label,
+                                None if args.optimization == "sum" else 1,
                             )
 
-                    if (
-                        text_similarity
-                        >= args.min_txt_similarity
-                    ):
-                        perturbed_text = text_news[
-                            "txt"
-                        ]
-                    else:
-                        text_similarity = 1.0
+                        else:
+                            with torch.no_grad():
+                                (
+                                    text_news,
+                                    text_similarity,
+                                ) = bertattack_attack(
+                                    model,
+                                    tokenizer,
+                                    processor,
+                                    args,
+                                    current_news,
+                                    label,
+                                    device,
+                                    bertattack_tokenizer,
+                                    bertattack_mlm,
+                                    device_mlm,
+                                )
 
-                    perturbed_text_rows.append(
-                        {
-                            "index": index,
-                            "original": clean_news["txt"],
-                            "perturbed": perturbed_text,
-                        }
-                    )
+                        if (
+                            text_similarity
+                            >= args.min_txt_similarity
+                        ):
+                            perturbed_text = text_news[
+                                "txt"
+                            ]
+                        else:
+                            text_similarity = 1.0
 
-                if args.attack_scope in {
-                    "image",
-                    "both",
-                }:
-                    (
-                        image_news,
-                        image_ssim,
-                        _,
-                    ) = img_perturbation(
-                        model,
-                        tokenizer,
-                        processor,
-                        args,
-                        clean_news,
-                        torch.tensor(
-                            [label],
-                            device=device,
-                        ),
-                    )
-
-                    perturbed_image = image_news[
-                        "img"
-                    ]
-
-                    image_ssim = float(
-                        image_ssim.item()
-                        if hasattr(
-                            image_ssim,
-                            "item",
+                        perturbed_text_rows.append(
+                            {
+                                "index": index,
+                                "original": clean_news["txt"],
+                                "perturbed": perturbed_text,
+                            }
                         )
-                        else image_ssim
-                    )
 
-                    save_perturbed_image(
-                        str(
-                            dump_dir
-                            / "images"
-                        ),
-                        index,
-                        perturbed_image,
-                    )
+                        # Alternating rounds feed the current adversarial text
+                        # forward, so the image attack of the next round sees it.
+                        current_news = {
+                            "txt": perturbed_text,
+                            "img": current_news["img"],
+                        }
+
+                    if image_step and args.attack_scope in {
+                        "image",
+                        "both",
+                    }:
+                        (
+                            image_news,
+                            image_ssim,
+                            round_clean_pixels,
+                        ) = img_perturbation(
+                            model,
+                            tokenizer,
+                            processor,
+                            args,
+                            current_news,
+                            torch.tensor(
+                                [label],
+                                device=device,
+                            ),
+                            steps=(None if args.optimization == "sum" else 1),
+                            # Randomise only the first step; later ones must
+                            # continue from the image already perturbed.
+                            random_start=(args.optimization == "sum" or step == 0),
+                        )
+
+                        perturbed_image = image_news[
+                            "img"
+                        ]
+
+                        image_ssim = float(
+                            image_ssim.item()
+                            if hasattr(
+                                image_ssim,
+                                "item",
+                            )
+                            else image_ssim
+                        )
+
+                        save_perturbed_image(
+                            str(
+                                dump_dir
+                                / "images"
+                            ),
+                            index,
+                            perturbed_image,
+                        )
+
+                        if clean_pixels is None:
+                            clean_pixels = round_clean_pixels
+
+                        # Keep every round inside the epsilon-ball of the
+                        # original image, not of the previous round's output.
+                        if args.optimization != "sum":
+                            perturbed_image = project_to_epsilon_ball(
+                                perturbed_image,
+                                clean_pixels,
+                                args.epsilon,
+                            )
+
+                        current_news = {
+                            "txt": current_news["txt"],
+                            "img": perturbed_image,
+                        }
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
