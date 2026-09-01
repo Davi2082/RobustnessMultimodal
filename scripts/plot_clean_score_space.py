@@ -38,7 +38,7 @@ from data_loading import my_datasets
 from utils import load_available_datasets, load_model
 from configuration_files.configuration import (
     NAME_LLM, NAME_IMG_EMBED, TEXT_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH,
-    BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICE_EVAL, LATE_FUSION_SVM_SEED,
+    BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICE_EVAL, RAND_SEED,
 )
 from configuration_files.paths import RESULT_PATH
 from models.fusion import load_fitted_heads
@@ -229,7 +229,7 @@ def main():
 
     # Use the heads persisted by scripts/fit_fusion_heads.py when present, so
     # the clean table describes the same rules the attacks target.
-    heads = load_fitted_heads() or fit_heads(train_df, LATE_FUSION_SVM_SEED)
+    heads = load_fitted_heads() or fit_heads(train_df, RAND_SEED)
     for name, h in heads.items():
         if hasattr(h, "best_params_"):
             print(f"{name}: best={h.best_params_}  CV ROC-AUC={h.best_score_:.4f}")

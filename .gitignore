@@ -3,6 +3,7 @@
 !README.md
 *.zip
 _*
+*.png
 
 # Dirs
 data_perturbed/
@@ -13,3 +14,12 @@ models/weights/
 logs/
 figures/
 venv/
+*/
+
+# Local scripts
+*.sh
+!run_script.sh
+
+# Local python scripts
+*.py
+!utils.py

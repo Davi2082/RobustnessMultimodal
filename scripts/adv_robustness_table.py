@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 
-from configuration_files.configuration import LATE_FUSION_SVM_SEED, THRESHOLD
+from configuration_files.configuration import RAND_SEED, THRESHOLD
 from configuration_files.paths import RESULT_PATH, late_fusion_directory_name, late_fusion_scenario_path
 from models.fusion import load_fitted_heads
 from scripts.plot_clean_score_space import fit_heads, rule_scores
@@ -109,7 +109,7 @@ def main():
     heads = load_fitted_heads() or fit_heads(
         pd.read_csv(os.path.join(R, "fusion_analysis",
                                  "train_unimodal_logits_clean.csv")),
-        LATE_FUSION_SVM_SEED)
+        RAND_SEED)
 
     # ---- clean unimodal logits ----
     t = pd.read_csv(os.path.join(R, "clean", "text", "results.csv")).set_index("index")

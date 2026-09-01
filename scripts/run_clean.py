@@ -31,7 +31,7 @@ from configuration_files.configuration import (
     NAME_IMG_EMBED,
     THRESHOLD,
 )
-from configuration_files.paths import RESULT_PATH
+from configuration_files.paths import DATASET_WEIGHTS_DIR, RESULT_PATH
 
 
 def run(cmd):
@@ -113,7 +113,7 @@ def main():
     clean_base = os.path.join(result_path, "clean")
     clean_text_csv = os.path.join(clean_base, "text", "results.csv")
     clean_image_csv = os.path.join(clean_base, "image", "results.csv")
-    head_dir = os.path.join(result_path, "fusion_analysis")
+    head_dir = DATASET_WEIGHTS_DIR
 
     print("=" * 70)
     print(f"CLEAN EVALUATION — {args.dataset}")

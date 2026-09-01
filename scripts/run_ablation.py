@@ -24,6 +24,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
 from configuration_files.configuration import DATASET, DEVICE_EVAL, THRESHOLD
+from configuration_files.paths import DATASET_WEIGHTS_DIR
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
 DEFAULT_SCORE = 0.5
@@ -124,7 +125,7 @@ def main():
     result_path = f"results/{args.dataset}/classification_results"
     clean_text_csv = os.path.join(result_path, "clean", "text", "results.csv")
     clean_image_csv = os.path.join(result_path, "clean", "image", "results.csv")
-    head_dir = os.path.join(result_path, "fusion_analysis")
+    head_dir = DATASET_WEIGHTS_DIR
 
     print("=" * 70)
     print(f"MISSING-MODALITY ABLATION — {args.dataset}")

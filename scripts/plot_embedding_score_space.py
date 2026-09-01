@@ -58,7 +58,7 @@ from data_loading import my_datasets
 from utils import load_available_datasets, load_model
 from configuration_files.configuration import (
     NAME_LLM, NAME_IMG_EMBED, BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICE_EVAL,
-    LATE_FUSION_SVM_SEED,
+    RAND_SEED,
 )
 from configuration_files.paths import RESULT_PATH
 
@@ -247,8 +247,8 @@ def main():
     train_ff = ff_modality_axes(args, device, dataset_classes, load_functions, "train", TRAIN_CSV)
     test_ff = ff_modality_axes(args, device, dataset_classes, load_functions, "test", test_csv)
 
-    heads = fit_heads(train_uni, LATE_FUSION_SVM_SEED)
-    ff = fit_ff_boundary(train_ff, LATE_FUSION_SVM_SEED)
+    heads = fit_heads(train_uni, RAND_SEED)
+    ff = fit_ff_boundary(train_ff, RAND_SEED)
     for name, h in heads.items():
         print(f"{name}: best={h.best_params_}  CV ROC-AUC={h.best_score_:.4f}")
     print(f"feature-fusion pooling weight on image tokens: w={ff['w']:.4f} "

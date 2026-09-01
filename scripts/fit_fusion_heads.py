@@ -27,7 +27,7 @@ from configuration_files.configuration import (
     BATCH_SIZE,
     DEVICE_EVAL,
     IMAGE_WEIGHTS_PATH,
-    LATE_FUSION_SVM_SEED,
+    RAND_SEED,
     N_TOKENS,
     NAME_IMG_EMBED,
     NAME_LLM,
@@ -173,13 +173,13 @@ def parse_args():
     parser.add_argument(
         "--input-space",
         choices=("logits", "scores"),
-        default="logits",
+        default="scores",
         help="Feature space of the head; recorded so attacks use the same one.",
     )
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
     parser.add_argument("--n_tokens", type=int, default=N_TOKENS)
     parser.add_argument("--name_llm", default=NAME_LLM)
-    parser.add_argument("--seed", type=int, default=LATE_FUSION_SVM_SEED)
+    parser.add_argument("--seed", type=int, default=RAND_SEED)
     parser.add_argument("--device", default=DEVICE_EVAL)
     parser.add_argument("--force", action="store_true", help="Recompute logits.")
     parser.add_argument("--set_params", type=bool, default=True)

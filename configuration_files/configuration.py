@@ -1,5 +1,7 @@
 import os
 
+RAND_SEED = 42
+
 # Dataset selection
 DATASET = "Recovery"  # default dataset for training and evaluation
 
@@ -73,4 +75,3 @@ LATE_FUSION_BUDGET_DIVISOR = 2
 LATE_FUSION_SVM_INPUT = "scores"
 LATE_FUSION_SVM_C = 1.0
 LATE_FUSION_SVM_GAMMA = "scale"
-LATE_FUSION_SVM_SEED = 42
