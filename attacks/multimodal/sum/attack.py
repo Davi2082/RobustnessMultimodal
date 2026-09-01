@@ -1,4 +1,4 @@
-"""Run fusion-aware attacks against two late-fused unimodal classifiers.
+"""Run adversarial attacks against late-fused and feature-fused classifiers.
 
 The complete classifier attacked by this script is:
 
@@ -1047,7 +1047,7 @@ def save_parameters(
     text_parameters: dict[str, Any],
     image_parameters: dict[str, Any],
 ) -> None:
-    """Save enough provenance to distinguish fusion-aware from post-hoc fusion."""
+    """Save attack provenance and parameters."""
     scope_budgets = late_fusion_attack_budgets(scenario)
     payload = {
         "Fusion": {
@@ -1361,10 +1361,7 @@ def main() -> None:
         indices,
     ) in tqdm(
         dataloader_test,
-        desc=(
-            f"Fusion-aware "
-            f"{args.fusion} attack"
-        ),
+        desc=f"Adversarial {args.fusion} attack",
         total=len(dataloader_test),
     ):
         images_device = move_to_device(

@@ -240,12 +240,15 @@ def load_model(device, args, correct_model_path=None):
 
     if args.merge_tokens == 0:
         args.merge_tokens = None
-    if args.set_params:
-        p = args.model_path.split("\\")[-1].split("_")
-        args.lora_alpha = int(p[2])
-        args.lora_r = int(p[3])
-        args.lora_dropout = float(p[4])
-        args.use_lora = True if "True" in p[5] else False
+
+    if args.model_path is not None:
+        p = os.path.basename(args.model_path).split("_")
+        args.name_img_embed = "openai/" + p[0]
+        if args.set_params:
+            args.lora_alpha = int(p[2])
+            args.lora_r = int(p[3])
+            args.lora_dropout = float(p[4])
+            args.use_lora = True if "True" in p[5] else False
 
     model, tokenizer, processor = get_Themis(
         name_llm=args.name_llm,

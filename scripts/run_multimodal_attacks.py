@@ -1,4 +1,4 @@
-"""Fusion-aware adversarial attacks on Recovery.
+"""Adversarial attacks on all fusion methods.
 
 Runs five attack types against every fusion method:
 

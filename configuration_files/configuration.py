@@ -8,9 +8,9 @@ DATASET = "Recovery"  # default dataset for training and evaluation
 # Models
 NAME_LLM = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 NAME_IMG_EMBED = "openai/clip-vit-base-patch32" # NAME_IMG_EMBED = "openai/clip-vit-large-patch14"
-TEXT_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_txt_only.pt")
-IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt") # IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_img_only.pt")
-FF_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
+TEXT_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt")
+IMAGE_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt")
+FF_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
 # CUDA devices — set DEVICE_MLM to a second GPU to parallelize text attacks
 DEVICE = "cuda:0"      # main model (eval + attacks)
@@ -23,7 +23,7 @@ N_TOKENS = 256
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = None
+SUBSET_SIZE = 4 # None
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake

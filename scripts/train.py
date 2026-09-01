@@ -208,14 +208,11 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
 
 def require_unimodal_checkpoints(dataset):
     """Check text + image checkpoints exist before fitting a fusion head."""
-    weights_dir = Path(DATASET_WEIGHTS_DIR)
-    text_ckpt = weights_dir / CHECKPOINT_NAMES["text"]
-    image_ckpt = weights_dir / CHECKPOINT_NAMES["image"]
     missing = []
-    if not text_ckpt.exists():
-        missing.append(f"text: {text_ckpt}")
-    if not image_ckpt.exists():
-        missing.append(f"image: {image_ckpt}")
+    if not Path(TEXT_WEIGHTS_PATH).exists():
+        missing.append(f"text: {TEXT_WEIGHTS_PATH}")
+    if not Path(IMAGE_WEIGHTS_PATH).exists():
+        missing.append(f"image: {IMAGE_WEIGHTS_PATH}")
     if missing:
         raise FileNotFoundError(
             "Unimodal checkpoints required to fit fusion heads:\n  "
@@ -231,10 +228,12 @@ def collect_unimodal_scores(args, dataset_class, annotation_loader, val_file, im
 
     all_labels, all_text_scores, all_image_scores = [], [], []
 
+    unimodal_paths = {"text": TEXT_WEIGHTS_PATH, "image": IMAGE_WEIGHTS_PATH}
     for modality in ("text", "image"):
+        encoder = "openai/" + os.path.basename(unimodal_paths[modality]).split("_")[0]
         ns = argparse.Namespace(
-            modality=modality, name_llm=args.name_llm, name_img_embed=NAME_IMG_EMBED,
-            model_path=None, n_tokens=args.n_tokens, merge_tokens=0,
+            modality=modality, name_llm=args.name_llm, name_img_embed=encoder,
+            model_path=unimodal_paths[modality], n_tokens=args.n_tokens, merge_tokens=0,
             lora_alpha=8, lora_r=8, lora_dropout=0.4, use_lora=True, set_params=True,
         )
         model, tokenizer, processor = load_model(device, ns)
@@ -342,6 +341,8 @@ def parse_args():
     parser.add_argument("--train-all", action="store_true",
                         help="Train all models in order: text, image, feature-fusion, svm-rbf, linear. "
                              "Skips any model whose checkpoint already exists.")
+    parser.add_argument("--force", action="store_true",
+                        help="Retrain even if checkpoint already exists.")
     parser.add_argument("--name-llm", default=NAME_LLM)
     parser.add_argument("--name-img-embed", default=None)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
@@ -375,13 +376,14 @@ def checkpoint_exists(model_name):
 
 def train_one(args, model_name, dataset_class, annotation_loader, train_file, val_file, image_dir):
     """Train or fit a single model, skipping if checkpoint exists."""
-    if checkpoint_exists(model_name):
+    if not args.force and checkpoint_exists(model_name):
         print(f"  [SKIP] {model_name} — checkpoint exists: {DEPLOYED_PATHS[model_name]}")
         return
 
     args.model = model_name
+    verb = "Fitting" if model_name in FUSION_HEADS else "Training"
     print(f"\n{'='*70}")
-    print(f"Training: {model_name}")
+    print(f"{verb}: {model_name}")
     print(f"{'='*70}")
 
     if model_name in NEURAL_MODELS:
@@ -409,11 +411,7 @@ def main():
         print("\nAll models trained.")
     else:
         print(f"  Model:   {args.model}")
-        if args.model in NEURAL_MODELS:
-            print(f"  Epochs:  {args.epochs}")
-            train_neural(args, dataset_class, annotation_loader, train_file, val_file, image_dir)
-        else:
-            fit_fusion_head(args, dataset_class, annotation_loader, val_file, image_dir)
+        train_one(args, args.model, dataset_class, annotation_loader, train_file, val_file, image_dir)
 
 
 if __name__ == "__main__":
