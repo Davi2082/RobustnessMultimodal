@@ -25,9 +25,9 @@ import numpy as np
 import pandas as pd
 
 from configuration_files.configuration import (
+    IMAGE_WEIGHTS_PATH,
     DATASET,
     DEVICE_EVAL,
-    IMAGE_WEIGHTS_PATH,
     NAME_IMG_EMBED,
     THRESHOLD,
 )
