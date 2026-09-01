@@ -32,7 +32,7 @@ from data_loading import my_datasets
 
 from models.themis_model import get_Themis
 from configuration_files.configuration import (
-    FF_NAME_IMG_EMBED,
+    NAME_IMG_EMBED,
     FF_WEIGHTS_PATH,
     SOURCE_LABEL,
     TARGET_LABEL,
@@ -234,7 +234,7 @@ def save_perturbed_texts(out_dir, rows):
 
 def load_model(device, args, correct_model_path=None):
     if args.modality == "feature-fusion" or args.modality == "intermediate-fusion":
-        args.name_img_embed = FF_NAME_IMG_EMBED
+        args.name_img_embed = NAME_IMG_EMBED
         if args.model_path is None:
             args.model_path = FF_WEIGHTS_PATH
 

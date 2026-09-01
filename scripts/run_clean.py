@@ -25,10 +25,10 @@ import numpy as np
 import pandas as pd
 
 from configuration_files.configuration import (
-    B32_IMAGE_WEIGHTS_PATH,
+    IMAGE_WEIGHTS_PATH,
     DATASET,
     DEVICE_EVAL,
-    FF_NAME_IMG_EMBED,
+    NAME_IMG_EMBED,
     THRESHOLD,
 )
 from configuration_files.paths import RESULT_PATH
@@ -134,8 +134,8 @@ def main():
         sys.executable, "-m", "scripts.eval",
         "--modality", "image",
         "--dataset", args.dataset,
-        "--name_img_embed", FF_NAME_IMG_EMBED,
-        "--model_path", B32_IMAGE_WEIGHTS_PATH,
+        "--name_img_embed", NAME_IMG_EMBED,
+        "--model_path", IMAGE_WEIGHTS_PATH,
     ])
 
     # ── 3. Feature-fusion ──
