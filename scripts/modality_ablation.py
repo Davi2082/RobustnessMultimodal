@@ -42,7 +42,7 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 from data_loading import my_datasets
 from utils import load_available_datasets, load_model
 from configuration_files.configuration import NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICE_EVAL, SUBSET_SIZE
-from configuration_files.paths import RESULT_PATH
+from configuration_files.paths import RESULT_PATH, dataset_annotations, dataset_images_dir
 
 
 @torch.no_grad()
@@ -136,8 +136,8 @@ def main():
         args.n_tokens,
         processor,
         tokenizer,
-        glob.glob(f"data/{args.dataset}/test.*")[0],
-        f"data/{args.dataset}/images",
+        dataset_annotations(args.dataset, "test"),
+        dataset_images_dir(args.dataset),
     )
     if SUBSET_SIZE is not None:
         loader = DataLoader(dataset_test, batch_size=args.batch_size,

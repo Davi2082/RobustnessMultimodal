@@ -70,7 +70,6 @@ def run_sum(fusion, device, dataset, result_path, log_to_file):
         "--fusion", fusion,
         "--attack-scope", "both",
         "--optimization", "sum",
-        "--device", device,
         "--results-path", result_path,
     ], log)
 
@@ -86,7 +85,6 @@ def run_interleaved(fusion, device, dataset, result_path, log_to_file):
         "--attack-scope", "both",
         "--optimization", "interleaved",
         "--output-dir", output_dir,
-        "--device", device,
         "--results-path", result_path,
     ], log)
 
