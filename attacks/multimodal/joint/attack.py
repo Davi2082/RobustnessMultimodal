@@ -445,6 +445,7 @@ def main() -> None:
     args.image_parameters_data = image_parameters
     model, tokenizer, processor = build_classifier(args, device)
 
+    text_model = model.text_model
     vocab_size = int(
         getattr(text_model.emb, "num_embeddings", 0)
         or text_model.emb.weight.shape[0]  # LoRA-wrapped modules expose the weight
