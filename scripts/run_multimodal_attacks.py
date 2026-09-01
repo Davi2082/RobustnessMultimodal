@@ -32,6 +32,7 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from configuration_files.configuration import DATASET, DEVICE
 from configuration_files.paths import RESULT_PATH
 
 FUSIONS = ["min", "mean", "max", "svm-rbf", "linear", "feature-fusion"]
@@ -62,8 +63,7 @@ def run(cmd, log_path=None):
     return result.returncode
 
 
-def run_sum(fusion, device, log_to_file):
-    """PGD-only, TREPAT-only, and PGD+TREPAT sum in one --attack-scope=both call."""
+def run_sum(fusion, device, dataset, result_path, log_to_file):
     log = os.path.join(LOG_DIR, f"sum_{fusion}.log") if log_to_file else None
     return run([
         sys.executable, "-m", "attacks.multimodal.sum.attack",
@@ -71,13 +71,13 @@ def run_sum(fusion, device, log_to_file):
         "--attack-scope", "both",
         "--optimization", "sum",
         "--device", device,
+        "--results-path", result_path,
     ], log)
 
 
-def run_interleaved(fusion, device, log_to_file):
-    """PGD+TREPAT alternating (interleaved optimization)."""
+def run_interleaved(fusion, device, dataset, result_path, log_to_file):
     output_dir = os.path.join(
-        RESULT_PATH, "perturbed", "late-fusion-interleaved", fusion,
+        result_path, "perturbed", "late-fusion-interleaved", fusion,
     )
     log = os.path.join(LOG_DIR, f"interleaved_{fusion}.log") if log_to_file else None
     return run([
@@ -87,17 +87,18 @@ def run_interleaved(fusion, device, log_to_file):
         "--optimization", "interleaved",
         "--output-dir", output_dir,
         "--device", device,
+        "--results-path", result_path,
     ], log)
 
 
-def run_joint(fusion, device, log_to_file):
-    """HotFlip+PGD joint (shared backward pass)."""
+def run_joint(fusion, device, dataset, result_path, log_to_file):
     log = os.path.join(LOG_DIR, f"joint_{fusion}.log") if log_to_file else None
     return run([
         sys.executable, "-m", "attacks.multimodal.joint.attack",
         "--fusion", fusion,
         "--attack-scope", "both",
         "--device", device,
+        "--results-path", result_path,
     ], log)
 
 
@@ -111,22 +112,22 @@ ATTACK_RUNNERS = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--dataset", default=DATASET)
+    parser.add_argument("--device", default=DEVICE)
     parser.add_argument("--fusions", nargs="+", default=FUSIONS,
-                        choices=FUSIONS, metavar="F",
-                        help=f"Fusion methods to attack (default: all)")
+                        choices=FUSIONS, metavar="F")
     parser.add_argument("--attacks", nargs="+", default=ATTACKS,
-                        choices=ATTACKS, metavar="A",
-                        help=f"Attack types to run (default: all)")
-    parser.add_argument("--device", default="cuda:0")
-    parser.add_argument("--log", action="store_true",
-                        help="Write subprocess output to log files instead of stdout")
+                        choices=ATTACKS, metavar="A")
+    parser.add_argument("--log", action="store_true")
     args = parser.parse_args()
 
     total = len(args.fusions) * len(args.attacks)
     done, failed = 0, 0
 
+    result_path = f"results/{args.dataset}/classification_results"
+
     print("=" * 70)
-    print("MULTIMODAL ATTACKS — Recovery dataset")
+    print(f"MULTIMODAL ATTACKS — {args.dataset}")
     print(f"  Fusions: {', '.join(args.fusions)}")
     print(f"  Attacks: {', '.join(args.attacks)}")
     print(f"  Device:  {args.device}")
@@ -140,7 +141,7 @@ def main():
         for fusion in args.fusions:
             done += 1
             print(f"\n[{done}/{total}] {attack} × {fusion}")
-            rc = runner(fusion, args.device, args.log)
+            rc = runner(fusion, args.device, args.dataset, result_path, args.log)
             if rc != 0:
                 failed += 1
 

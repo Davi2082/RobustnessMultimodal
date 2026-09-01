@@ -1,4 +1,4 @@
-"""Missing-modality ablation for all fusion methods on Recovery.
+"""Missing-modality ablation for all fusion methods.
 
 Measures what each fusion method predicts when one input modality is removed:
 
@@ -6,13 +6,11 @@ Measures what each fusion method predicts when one input modality is removed:
   2. Late-fusion ablation      (post-hoc: set the missing modality's score to 0.5
                                 and apply min / mean / max / svm-rbf / linear)
 
-The paper table (themis_missing_modality.tex) reports AUC, F1, Acc and
-deltas versus the both-modalities baseline for each method.
-
 Usage:
-    python3 -m scripts.run_ablation
+    python3 -m scripts.run_ablation --dataset Recovery --device cuda:0
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -25,12 +23,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-from configuration_files.configuration import THRESHOLD
-from configuration_files.paths import CLEAN_BASE, CLEAN_IMAGE_CSV, CLEAN_TEXT_CSV, RESULT_PATH
-
-FUSION_HEAD_DIR = os.path.join(RESULT_PATH, "fusion_analysis")
-SVM_HEAD_PATH = os.path.join(FUSION_HEAD_DIR, "svm_rbf_head.pkl")
-LINEAR_HEAD_PATH = os.path.join(FUSION_HEAD_DIR, "linear_head.pkl")
+from configuration_files.configuration import DATASET, DEVICE_EVAL, THRESHOLD
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
 DEFAULT_SCORE = 0.5
@@ -43,7 +36,7 @@ def run(cmd):
     subprocess.run(cmd, check=True)
 
 
-def fuse_scores(s_txt, s_img, mode):
+def fuse_scores(s_txt, s_img, mode, head_dir):
     """Apply a fusion rule to text and image score arrays."""
     if mode == "mean":
         return (s_txt + s_img) / 2
@@ -52,7 +45,8 @@ def fuse_scores(s_txt, s_img, mode):
     elif mode == "max":
         return np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        head_path = SVM_HEAD_PATH if mode == "svm-rbf" else LINEAR_HEAD_PATH
+        slug = "svm_rbf" if mode == "svm-rbf" else "linear"
+        head_path = os.path.join(head_dir, f"{slug}_head.pkl")
         if not os.path.isfile(head_path):
             return None
         head = joblib.load(head_path)
@@ -75,7 +69,7 @@ def compute_metrics(y_true, scores, threshold=THRESHOLD):
     return auc, f1, acc
 
 
-def late_fusion_ablation(text_csv, image_csv, output_dir):
+def late_fusion_ablation(text_csv, image_csv, output_dir, head_dir):
     """Compute late-fusion metrics under missing-modality conditions."""
     df_txt = pd.read_csv(text_csv)
     df_img = pd.read_csv(image_csv)
@@ -85,9 +79,9 @@ def late_fusion_ablation(text_csv, image_csv, output_dir):
 
     rows = []
     for mode in LATE_FUSION_MODES:
-        both = fuse_scores(s_txt, s_img, mode)
-        img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, mode)
-        txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), mode)
+        both = fuse_scores(s_txt, s_img, mode, head_dir)
+        img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, mode, head_dir)
+        txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), mode, head_dir)
 
         if both is None or img_only is None or txt_only is None:
             print(f"  [SKIP] {mode} — fitted head not found")
@@ -98,19 +92,16 @@ def late_fusion_ablation(text_csv, image_csv, output_dir):
         auc_t, f1_t, acc_t = compute_metrics(labels, txt_only)
 
         rows.append({
-            "method": mode,
-            "condition": "both",
+            "method": mode, "condition": "both",
             "AUC": round(auc_b, 3), "F1": round(f1_b, 3), "Acc": round(acc_b, 3),
         })
         rows.append({
-            "method": mode,
-            "condition": "image_only",
+            "method": mode, "condition": "image_only",
             "AUC": round(auc_i, 3), "F1": round(f1_i, 3), "Acc": round(acc_i, 3),
             "dAUC": round(auc_i - auc_b, 3), "dF1": round(f1_i - f1_b, 3), "dAcc": round(acc_i - acc_b, 3),
         })
         rows.append({
-            "method": mode,
-            "condition": "text_only",
+            "method": mode, "condition": "text_only",
             "AUC": round(auc_t, 3), "F1": round(f1_t, 3), "Acc": round(acc_t, 3),
             "dAUC": round(auc_t - auc_b, 3), "dF1": round(f1_t - f1_b, 3), "dAcc": round(acc_t - acc_b, 3),
         })
@@ -125,8 +116,19 @@ def late_fusion_ablation(text_csv, image_csv, output_dir):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", default=DATASET)
+    parser.add_argument("--device", default=DEVICE_EVAL)
+    args = parser.parse_args()
+
+    result_path = f"results/{args.dataset}/classification_results"
+    clean_text_csv = os.path.join(result_path, "clean", "text", "results.csv")
+    clean_image_csv = os.path.join(result_path, "clean", "image", "results.csv")
+    head_dir = os.path.join(result_path, "fusion_analysis")
+
     print("=" * 70)
-    print("MISSING-MODALITY ABLATION — Recovery dataset")
+    print(f"MISSING-MODALITY ABLATION — {args.dataset}")
+    print(f"  Device: {args.device}")
     print("=" * 70)
 
     # ── 1. Feature-fusion ablation (blank + drop) ──
@@ -134,21 +136,21 @@ def main():
     run([
         sys.executable, "-m", "scripts.modality_ablation",
         "--modality", "feature-fusion",
+        "--dataset", args.dataset,
     ])
 
     # ── 2. Late-fusion ablation ──
     print("\n[2/2] Late-fusion modality ablation")
-    if not os.path.isfile(CLEAN_TEXT_CSV):
-        print(f"ERROR: Text CSV not found: {CLEAN_TEXT_CSV}")
-        print("       Run run_clean.py first.")
+    if not os.path.isfile(clean_text_csv):
+        print(f"ERROR: Text CSV not found: {clean_text_csv}")
+        print("       Run scripts.run_clean first.")
         sys.exit(1)
-    if not os.path.isfile(CLEAN_IMAGE_CSV):
-        print(f"ERROR: Image CSV not found: {CLEAN_IMAGE_CSV}")
-        print("       Run run_clean.py first.")
+    if not os.path.isfile(clean_image_csv):
+        print(f"ERROR: Image CSV not found: {clean_image_csv}")
+        print("       Run scripts.run_clean first.")
         sys.exit(1)
 
-    output_dir = os.path.join(RESULT_PATH, "fusion_analysis")
-    late_fusion_ablation(CLEAN_TEXT_CSV, CLEAN_IMAGE_CSV, output_dir)
+    late_fusion_ablation(clean_text_csv, clean_image_csv, head_dir, head_dir)
 
     print("\n" + "=" * 70)
     print("ABLATION COMPLETE")

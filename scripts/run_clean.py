@@ -1,4 +1,4 @@
-"""Clean evaluation for all modalities on Recovery.
+"""Clean evaluation for all modalities.
 
 Runs:
   1. Text-only          (L14 checkpoint — CLIP unused in text forward pass)
@@ -9,9 +9,10 @@ Runs:
                          mixed-encoder issue in eval.py)
 
 Usage:
-    python3 -m scripts.run_clean
+    python3 -m scripts.run_clean --dataset Recovery --device cuda:0
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -25,19 +26,12 @@ import pandas as pd
 
 from configuration_files.configuration import (
     B32_IMAGE_WEIGHTS_PATH,
+    DATASET,
+    DEVICE_EVAL,
     FF_NAME_IMG_EMBED,
     THRESHOLD,
 )
-from configuration_files.paths import (
-    CLEAN_BASE,
-    CLEAN_IMAGE_CSV,
-    CLEAN_TEXT_CSV,
-    RESULT_PATH,
-)
-
-FUSION_HEAD_DIR = os.path.join(RESULT_PATH, "fusion_analysis")
-SVM_HEAD_PATH = os.path.join(FUSION_HEAD_DIR, "svm_rbf_head.pkl")
-LINEAR_HEAD_PATH = os.path.join(FUSION_HEAD_DIR, "linear_head.pkl")
+from configuration_files.paths import RESULT_PATH
 
 
 def run(cmd):
@@ -47,7 +41,7 @@ def run(cmd):
     subprocess.run(cmd, check=True)
 
 
-def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, threshold=THRESHOLD):
+def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, head_dir, threshold=THRESHOLD):
     """Compute late-fusion scores from separate text and image CSVs."""
     df_txt = pd.read_csv(text_csv)
     df_img = pd.read_csv(image_csv)
@@ -65,7 +59,7 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, threshold=THRES
     elif mode == "max":
         scores = np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        head_path = SVM_HEAD_PATH if mode == "svm-rbf" else LINEAR_HEAD_PATH
+        head_path = os.path.join(head_dir, f"{'svm_rbf' if mode == 'svm-rbf' else 'linear'}_head.pkl")
         if not os.path.isfile(head_path):
             print(f"  [SKIP] Fitted head not found: {head_path}")
             print(f"         Run scripts/fit_fusion_heads.py first.")
@@ -103,9 +97,6 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, threshold=THRES
         "Text CSV": text_csv,
         "Image CSV": image_csv,
     }
-    if mode in ("svm-rbf", "linear"):
-        params["Head Path"] = head_path
-
     with open(os.path.join(output_dir, "parameters.json"), "w") as f:
         json.dump(params, f, indent=4)
 
@@ -113,8 +104,20 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, threshold=THRES
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", default=DATASET)
+    parser.add_argument("--device", default=DEVICE_EVAL)
+    args = parser.parse_args()
+
+    result_path = f"results/{args.dataset}/classification_results"
+    clean_base = os.path.join(result_path, "clean")
+    clean_text_csv = os.path.join(clean_base, "text", "results.csv")
+    clean_image_csv = os.path.join(clean_base, "image", "results.csv")
+    head_dir = os.path.join(result_path, "fusion_analysis")
+
     print("=" * 70)
-    print("CLEAN EVALUATION — Recovery dataset")
+    print(f"CLEAN EVALUATION — {args.dataset}")
+    print(f"  Device: {args.device}")
     print("=" * 70)
 
     # ── 1. Text-only ──
@@ -122,6 +125,7 @@ def main():
     run([
         sys.executable, "-m", "scripts.eval",
         "--modality", "text",
+        "--dataset", args.dataset,
     ])
 
     # ── 2. Image-only (B32) ──
@@ -129,6 +133,7 @@ def main():
     run([
         sys.executable, "-m", "scripts.eval",
         "--modality", "image",
+        "--dataset", args.dataset,
         "--name_img_embed", FF_NAME_IMG_EMBED,
         "--model_path", B32_IMAGE_WEIGHTS_PATH,
     ])
@@ -138,6 +143,7 @@ def main():
     run([
         sys.executable, "-m", "scripts.eval",
         "--modality", "feature-fusion",
+        "--dataset", args.dataset,
     ])
 
     # ── 4. Late-fusion (post-hoc from text + image CSVs) ──
@@ -145,17 +151,17 @@ def main():
     print("LATE-FUSION (post-hoc from text + image CSVs)")
     print("=" * 70)
 
-    if not os.path.isfile(CLEAN_TEXT_CSV):
-        print(f"ERROR: Text CSV not found: {CLEAN_TEXT_CSV}")
+    if not os.path.isfile(clean_text_csv):
+        print(f"ERROR: Text CSV not found: {clean_text_csv}")
         sys.exit(1)
-    if not os.path.isfile(CLEAN_IMAGE_CSV):
-        print(f"ERROR: Image CSV not found: {CLEAN_IMAGE_CSV}")
+    if not os.path.isfile(clean_image_csv):
+        print(f"ERROR: Image CSV not found: {clean_image_csv}")
         sys.exit(1)
 
     for mode in ("min", "mean", "max", "svm-rbf", "linear"):
-        output_dir = os.path.join(CLEAN_BASE, "late-fusion", mode)
+        output_dir = os.path.join(clean_base, "late-fusion", mode)
         print(f"\n  Late-fusion: {mode}")
-        late_fusion_from_csvs(CLEAN_TEXT_CSV, CLEAN_IMAGE_CSV, mode, output_dir)
+        late_fusion_from_csvs(clean_text_csv, clean_image_csv, mode, output_dir, head_dir)
 
     print("\n" + "=" * 70)
     print("ALL CLEAN EVALUATIONS COMPLETE")
