@@ -4,18 +4,11 @@ import os
 DATASET = "Recovery"  # default dataset for training and evaluation
 
 # Models
-NAME_LLM = "TinyLlama/TinyLlama-1.1B-Chat-v1.0" # default LLM model
-NAME_IMG_EMBED = "openai/clip-vit-large-patch14" # default image embedding model
+NAME_LLM = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+NAME_IMG_EMBED = "openai/clip-vit-base-patch32" # NAME_IMG_EMBED = "openai/clip-vit-large-patch14"
 TEXT_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt")
-IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_img_only.pt")
+IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt") # IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
-FF_NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
-# Image-only branch trained on the same encoder as the feature-fusion model,
-# so late fusion can be compared against it on equal footing.
-B32_IMAGE_WEIGHTS_PATH = os.path.join(
-    "models", "weights", DATASET,
-    "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt",
-)
 
 # CUDA devices
 DEVICE = "cuda:0"      # main model (eval + attacks)
@@ -28,7 +21,7 @@ N_TOKENS = 256
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = None
+SUBSET_SIZE = 4
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
@@ -74,18 +67,6 @@ ALTERNATION_ROUNDS = 1 # Rounds of interleaved image-PGD + text-BERTAttack (1 = 
 LATE_FUSION_METHODS = ("min", "max", "mean", "svm-rbf")
 LATE_FUSION_ATTACK_SCOPES = ("image", "text", "both")
 LATE_FUSION_BUDGET_DIVISOR = 2
-
-def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
-    """Return the scope-specific effective budgets and their divisor."""
-    if attack_scope not in LATE_FUSION_ATTACK_SCOPES:
-        raise ValueError(f"Unknown late-fusion attack scope: {attack_scope}")
-
-    divisor = LATE_FUSION_BUDGET_DIVISOR if attack_scope == "both" else 1
-    return {
-        "pgd_iters": max(1, PGD_ITERS // divisor),
-        "max_variants": max(1, MAX_VARIANTS // divisor),
-        "divisor": divisor,
-    }
 
 
 # The RBF-SVM is fitted on clean text/image predictions from the training set.

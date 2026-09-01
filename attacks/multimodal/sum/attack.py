@@ -75,11 +75,27 @@ from configuration_files.configuration import (
     MAX_WORDS_TO_ATTACK,
     MIN_TXT_SIMILARITY,
     SOURCE_LABEL,
+    LATE_FUSION_ATTACK_SCOPES,
+    LATE_FUSION_BUDGET_DIVISOR,
+    MAX_VARIANTS,
+    PGD_ITERS,
     SUBSET_SIZE,
     TARGET_LABEL,
     THRESHOLD_PRED_SCORE,
-    late_fusion_attack_budgets,
 )
+
+
+def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
+    """Return the scope-specific effective budgets and their divisor."""
+    if attack_scope not in LATE_FUSION_ATTACK_SCOPES:
+        raise ValueError(f"Unknown late-fusion attack scope: {attack_scope}")
+
+    divisor = LATE_FUSION_BUDGET_DIVISOR if attack_scope == "both" else 1
+    return {
+        "pgd_iters": max(1, PGD_ITERS // divisor),
+        "max_variants": max(1, MAX_VARIANTS // divisor),
+        "divisor": divisor,
+    }
 from configuration_files.paths import (
     dataset_annotations,
     dataset_images_dir,
