@@ -9,13 +9,15 @@ Runs:
                          mixed-encoder issue in eval.py)
 
 Usage:
-    python3 run_clean.py
+    python3 -m scripts.run_clean
 """
 
 import json
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import joblib
 import numpy as np
@@ -118,14 +120,14 @@ def main():
     # ── 1. Text-only ──
     print("\n[1/3] Text-only evaluation")
     run([
-        sys.executable, "scripts/eval.py",
+        sys.executable, "-m", "scripts.eval",
         "--modality", "text",
     ])
 
     # ── 2. Image-only (B32) ──
     print("\n[2/3] Image-only evaluation (B32)")
     run([
-        sys.executable, "scripts/eval.py",
+        sys.executable, "-m", "scripts.eval",
         "--modality", "image",
         "--name_img_embed", FF_NAME_IMG_EMBED,
         "--model_path", B32_IMAGE_WEIGHTS_PATH,
@@ -134,7 +136,7 @@ def main():
     # ── 3. Feature-fusion ──
     print("\n[3/3] Feature-fusion evaluation")
     run([
-        sys.executable, "scripts/eval.py",
+        sys.executable, "-m", "scripts.eval",
         "--modality", "feature-fusion",
     ])
 

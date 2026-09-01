@@ -30,6 +30,8 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from configuration_files.paths import RESULT_PATH
 
 FUSIONS = ["min", "mean", "max", "svm-rbf", "linear", "feature-fusion"]

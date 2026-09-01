@@ -10,13 +10,15 @@ The paper table (themis_missing_modality.tex) reports AUC, F1, Acc and
 deltas versus the both-modalities baseline for each method.
 
 Usage:
-    python3 run_ablation.py
+    python3 -m scripts.run_ablation
 """
 
 import json
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import joblib
 import numpy as np
