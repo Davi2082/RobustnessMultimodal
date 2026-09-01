@@ -24,10 +24,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    B32_IMAGE_WEIGHTS_PATH,
     BATCH_SIZE,
     DEVICE_EVAL,
-    FF_NAME_IMG_EMBED,
+    IMAGE_WEIGHTS_PATH,
     LATE_FUSION_SVM_SEED,
     N_TOKENS,
     NAME_IMG_EMBED,
@@ -77,7 +76,7 @@ def unimodal_logits(args, device, dataset_classes, load_functions) -> pd.DataFra
     columns = {}
     for modality, weights, encoder in (
         ("text", TEXT_WEIGHTS_PATH, NAME_IMG_EMBED),
-        ("image", B32_IMAGE_WEIGHTS_PATH, FF_NAME_IMG_EMBED),
+        ("image", IMAGE_WEIGHTS_PATH, NAME_IMG_EMBED),
     ):
         args.modality, args.model_path, args.name_img_embed = modality, weights, encoder
         model, tokenizer, processor = load_model(device, args)

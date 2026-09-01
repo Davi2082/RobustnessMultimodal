@@ -10,10 +10,10 @@ TEXT_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-p
 IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt") # IMAGE_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join("models", "weights", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
-# CUDA devices
+# CUDA devices — set DEVICE_MLM to a second GPU to parallelize text attacks
 DEVICE = "cuda:0"      # main model (eval + attacks)
 DEVICE_EVAL = "cuda:0" # clean eval
-DEVICE_MLM = "cuda:0"  # TREPAT rewriter / BERT MLM (text attacks only)
+DEVICE_MLM = "cuda:0"  # TREPAT rewriter / BERT MLM; set to "cuda:1" for multi-GPU
 
 # Model parameters
 BATCH_SIZE = 128
@@ -21,7 +21,7 @@ N_TOKENS = 256
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = 4
+SUBSET_SIZE = None
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake

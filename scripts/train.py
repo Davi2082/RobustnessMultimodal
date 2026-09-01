@@ -16,7 +16,6 @@ from tqdm import tqdm
 from configuration_files.configuration import (
     BATCH_SIZE,
     DATASET,
-    FF_NAME_IMG_EMBED,
     NAME_IMG_EMBED,
     NAME_LLM,
     N_TOKENS,
@@ -128,7 +127,7 @@ def evaluate(model, loader, criterion, device, model_type):
 def main():
     args = parse_args()
     dataset_class, annotation_loader, train_file, val_file, image_dir = resolve_dataset_assets(args.dataset)
-    image_encoder = args.name_img_embed or (FF_NAME_IMG_EMBED if args.model == "feature-fusion" else NAME_IMG_EMBED)
+    image_encoder = args.name_img_embed or NAME_IMG_EMBED
     merge_tokens = args.merge_tokens or None
     device = torch.device(args.device)
 

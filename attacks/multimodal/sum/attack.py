@@ -838,6 +838,103 @@ def fusion_trepat_attack(
     )
 
 
+class TrepatStepState:
+    """Persistent TrePAT state for interleaved mode.
+
+    Created once per sample; ``step()`` draws the next variant without
+    regenerating the candidate pool.
+    """
+
+    def __init__(
+        self,
+        model: LateFusionClassifier,
+        tokenizer: Any,
+        processor: Any,
+        args: argparse.Namespace,
+        news: dict[str, Any],
+        device: torch.device,
+        rephraser: Rephraser,
+        source_label: int,
+        target_label: int,
+    ):
+        self.hidden_text: str
+        self.visible_text, self.hidden_text = visible_text_window(
+            news["txt"], tokenizer, args.n_tokens,
+        )
+        self.original_text = news["txt"]
+        self.victim = LateFusionTrepatVictim(
+            model=model, tokenizer=tokenizer, processor=processor,
+            args=args, device=device, image=news["img"],
+        )
+        self.modifier = Modifier(
+            rephraser, splitter="cascade", weak=False,
+            max_variants=args.max_variants,
+        )
+        self.source_label = source_label
+        self.target_label = target_label
+        self.best_text: str = news["txt"]
+        self.best_target_prob: float = -1.0
+        self._initialized = False
+
+    def step(self, image: Image.Image) -> tuple[dict[str, Any], float]:
+        """Try the next TrePAT variant; return (news_dict, similarity).
+
+        Updates the victim's image so the fused score reflects the
+        current adversarial image from the PGD channel.
+        """
+        # Update victim image for this round.
+        processed = self.victim.processor(
+            images=image, return_tensors="pt",
+        ).to(self.victim.device)
+        pixel_values = processed["pixel_values"]
+        if pixel_values.ndim == 4:
+            pixel_values = pixel_values.unsqueeze(1)
+        self.victim.image = pixel_values
+        self.victim._prob_cache.clear()
+
+        if not self._initialized:
+            pred = self.victim.get_pred([self.visible_text])[0]
+            if pred != self.source_label:
+                return {"txt": self.original_text, "img": image}, 1.0
+            self.best_target_prob = self.victim.get_prob(
+                [self.visible_text]
+            )[0, self.target_label]
+            self.modifier.init(self.visible_text)
+            self._initialized = True
+
+        x_new = self.modifier.get_next_variant()
+        if x_new is None:
+            return self._finalize(image)
+
+        probs = self.victim.get_prob([x_new])[0]
+        target_prob = probs[self.target_label]
+        gain = target_prob - self.best_target_prob
+        self.modifier.get_feedback(gain)
+
+        if target_prob > self.best_target_prob:
+            self.best_target_prob = target_prob
+            self.best_text = x_new + self.hidden_text
+
+        pred_new = self.victim.get_pred([x_new])[0]
+        if pred_new == self.target_label:
+            self.best_text = x_new + self.hidden_text
+
+        return self._finalize(image)
+
+    def _finalize(
+        self, image: Image.Image,
+    ) -> tuple[dict[str, Any], float]:
+        with torch.inference_mode():
+            original_emb = model_sbert.encode(
+                self.original_text, convert_to_tensor=True, device="cpu",
+            )
+            perturbed_emb = model_sbert.encode(
+                self.best_text, convert_to_tensor=True, device="cpu",
+            )
+            similarity = util.cos_sim(original_emb, perturbed_emb).item()
+        return {"txt": self.best_text, "img": image}, similarity
+
+
 def move_to_device(
     value: Any,
     device: torch.device,
@@ -1362,6 +1459,19 @@ def main() -> None:
                 current_news = dict(clean_news)
                 clean_pixels = None
 
+                # Interleaved TrePAT: build candidates once, step through them.
+                trepat_state = None
+                if (
+                    args.optimization != "sum"
+                    and args.attack_method == "trepat"
+                    and args.attack_scope in {"text", "both"}
+                ):
+                    trepat_state = TrepatStepState(
+                        model, tokenizer, processor, args,
+                        current_news, device, rephraser,
+                        source_label, target_label,
+                    )
+
                 # "sum" spends each channel's budget in a single pass against a
                 # clean partner, so the two perturbations never meet until they
                 # are combined. "interleaved" spends the same budget one unit at
@@ -1375,21 +1485,29 @@ def main() -> None:
                         "both",
                     }:
                         if args.attack_method == "trepat":
-                            (
-                                text_news,
-                                text_similarity,
-                            ) = fusion_trepat_attack(
-                                model,
-                                tokenizer,
-                                processor,
-                                args,
-                                current_news,
-                                device,
-                                rephraser,
-                                source_label,
-                                target_label,
-                                None if args.optimization == "sum" else 1,
-                            )
+                            if args.optimization == "sum":
+                                (
+                                    text_news,
+                                    text_similarity,
+                                ) = fusion_trepat_attack(
+                                    model,
+                                    tokenizer,
+                                    processor,
+                                    args,
+                                    current_news,
+                                    device,
+                                    rephraser,
+                                    source_label,
+                                    target_label,
+                                    None,
+                                )
+                            else:
+                                (
+                                    text_news,
+                                    text_similarity,
+                                ) = trepat_state.step(
+                                    current_news["img"],
+                                )
 
                         else:
                             with torch.no_grad():

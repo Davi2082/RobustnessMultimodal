@@ -37,7 +37,7 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 from data_loading import my_datasets
 from utils import load_available_datasets, load_model
 from configuration_files.configuration import (
-    NAME_LLM, NAME_IMG_EMBED, FF_NAME_IMG_EMBED, TEXT_WEIGHTS_PATH, B32_IMAGE_WEIGHTS_PATH,
+    NAME_LLM, NAME_IMG_EMBED, TEXT_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH,
     BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICE_EVAL, LATE_FUSION_SVM_SEED,
 )
 from configuration_files.paths import RESULT_PATH
@@ -55,7 +55,7 @@ def unimodal_train_logits(args, device, dataset_classes, load_functions):
 
     out = {}
     for modality, weights, encoder in (("text", TEXT_WEIGHTS_PATH, NAME_IMG_EMBED),
-                                      ("image", B32_IMAGE_WEIGHTS_PATH, FF_NAME_IMG_EMBED)):
+                                      ("image", IMAGE_WEIGHTS_PATH, NAME_IMG_EMBED)):
         args.modality, args.model_path, args.name_img_embed = modality, weights, encoder
         model, tokenizer, processor = load_model(device, args)
         model.eval()
