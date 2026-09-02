@@ -103,6 +103,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default=DATASET)
     parser.add_argument("--device", default=DEVICE_EVAL)
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run even if results already exist.")
     args = parser.parse_args()
 
     result_path = f"results/{args.dataset}/classification_results"
@@ -119,30 +121,40 @@ def main():
     t0 = time.time()
 
     # ── 1. Text-only ──
-    print("\n[1/3] Text-only evaluation")
-    run([
-        sys.executable, "-m", "scripts.eval",
-        "--modality", "text",
-        "--dataset", args.dataset,
-    ])
+    if args.force or not os.path.isfile(clean_text_csv):
+        print("\n[1/3] Text-only evaluation")
+        run([
+            sys.executable, "-m", "scripts.eval",
+            "--modality", "text",
+            "--dataset", args.dataset,
+        ])
+    else:
+        print("\n[1/3] Text-only — SKIP (results exist, use --force to re-run)")
 
     # ── 2. Image-only (B32) ──
-    print("\n[2/3] Image-only evaluation (B32)")
-    run([
-        sys.executable, "-m", "scripts.eval",
-        "--modality", "image",
-        "--dataset", args.dataset,
-        "--name_img_embed", NAME_IMG_EMBED,
-        "--model_path", IMAGE_WEIGHTS_PATH,
-    ])
+    if args.force or not os.path.isfile(clean_image_csv):
+        print("\n[2/3] Image-only evaluation (B32)")
+        run([
+            sys.executable, "-m", "scripts.eval",
+            "--modality", "image",
+            "--dataset", args.dataset,
+            "--name_img_embed", NAME_IMG_EMBED,
+            "--model_path", IMAGE_WEIGHTS_PATH,
+        ])
+    else:
+        print("\n[2/3] Image-only — SKIP (results exist, use --force to re-run)")
 
     # ── 3. Feature-fusion ──
-    print("\n[3/3] Feature-fusion evaluation")
-    run([
-        sys.executable, "-m", "scripts.eval",
-        "--modality", "feature-fusion",
-        "--dataset", args.dataset,
-    ])
+    ff_csv = os.path.join(clean_base, "feature-fusion", "results.csv")
+    if args.force or not os.path.isfile(ff_csv):
+        print("\n[3/3] Feature-fusion evaluation")
+        run([
+            sys.executable, "-m", "scripts.eval",
+            "--modality", "feature-fusion",
+            "--dataset", args.dataset,
+        ])
+    else:
+        print("\n[3/3] Feature-fusion — SKIP (results exist, use --force to re-run)")
 
     # ── 4. Late-fusion (post-hoc from text + image CSVs) ──
     print("\n" + "=" * 70)
@@ -158,6 +170,10 @@ def main():
 
     for mode in ("min", "mean", "max", "svm-rbf", "linear"):
         output_dir = os.path.join(clean_base, "late-fusion", mode)
+        lf_csv = os.path.join(output_dir, "results.csv")
+        if not args.force and os.path.isfile(lf_csv):
+            print(f"\n  Late-fusion: {mode} — SKIP (use --force to re-run)")
+            continue
         print(f"\n  Late-fusion: {mode}")
         late_fusion_from_csvs(clean_text_csv, clean_image_csv, mode, output_dir, head_dir)
 

@@ -116,6 +116,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default=DATASET)
     parser.add_argument("--device", default=DEVICE_EVAL)
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run even if results already exist.")
     args = parser.parse_args()
 
     result_path = f"results/{args.dataset}/classification_results"
@@ -130,26 +132,36 @@ def main():
 
     t0 = time.time()
 
+    ablation_output_dir = os.path.join(result_path, "ablation")
+    ablation_csv = os.path.join(ablation_output_dir, "late_fusion_modality_ablation.csv")
+
     # ── 1. Feature-fusion ablation (blank + drop) ──
-    print("\n[1/2] Feature-fusion modality ablation")
-    run([
-        sys.executable, "-m", "scripts.modality_ablation",
-        "--modality", "feature-fusion",
-        "--dataset", args.dataset,
-    ])
+    ff_ablation_csv = os.path.join(ablation_output_dir, "feature_fusion_modality_ablation.csv")
+    if args.force or not os.path.isfile(ff_ablation_csv):
+        print("\n[1/2] Feature-fusion modality ablation")
+        run([
+            sys.executable, "-m", "scripts.modality_ablation",
+            "--modality", "feature-fusion",
+            "--dataset", args.dataset,
+        ])
+    else:
+        print("\n[1/2] Feature-fusion ablation — SKIP (use --force to re-run)")
 
     # ── 2. Late-fusion ablation ──
-    print("\n[2/2] Late-fusion modality ablation")
-    if not os.path.isfile(clean_text_csv):
-        print(f"ERROR: Text CSV not found: {clean_text_csv}")
-        print("       Run scripts.run_clean first.")
-        sys.exit(1)
-    if not os.path.isfile(clean_image_csv):
-        print(f"ERROR: Image CSV not found: {clean_image_csv}")
-        print("       Run scripts.run_clean first.")
-        sys.exit(1)
+    if not args.force and os.path.isfile(ablation_csv):
+        print("\n[2/2] Late-fusion ablation — SKIP (use --force to re-run)")
+    else:
+        print("\n[2/2] Late-fusion modality ablation")
+        if not os.path.isfile(clean_text_csv):
+            print(f"ERROR: Text CSV not found: {clean_text_csv}")
+            print("       Run scripts.run_clean first.")
+            sys.exit(1)
+        if not os.path.isfile(clean_image_csv):
+            print(f"ERROR: Image CSV not found: {clean_image_csv}")
+            print("       Run scripts.run_clean first.")
+            sys.exit(1)
 
-    late_fusion_ablation(clean_text_csv, clean_image_csv, head_dir, head_dir)
+        late_fusion_ablation(clean_text_csv, clean_image_csv, ablation_output_dir, head_dir)
 
     elapsed = time.time() - t0
     print("\n" + "=" * 70)

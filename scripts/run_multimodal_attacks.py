@@ -116,6 +116,8 @@ def main():
                         choices=FUSIONS, metavar="F")
     parser.add_argument("--attacks", nargs="+", default=ATTACKS,
                         choices=ATTACKS, metavar="A")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run even if results already exist.")
     parser.add_argument("--log", action="store_true")
     args = parser.parse_args()
 
@@ -134,10 +136,23 @@ def main():
 
     t0 = time.time()
 
+    attack_dirs = {
+        "sum": "late-fusion",
+        "interleaved": "late-fusion-interleaved",
+        "joint": "late-fusion-joint",
+    }
+
     for attack in args.attacks:
         runner = ATTACK_RUNNERS[attack]
         for fusion in args.fusions:
             done += 1
+            pert_dir = attack_dirs.get(attack, f"late-fusion-{attack}")
+            result_csv = os.path.join(
+                result_path, "perturbed", pert_dir, fusion, "perturbed_results.csv",
+            )
+            if not args.force and os.path.isfile(result_csv):
+                print(f"\n[{done}/{total}] {attack} × {fusion} — SKIP (use --force to re-run)")
+                continue
             print(f"\n[{done}/{total}] {attack} × {fusion}")
             rc = runner(fusion, args.device, args.dataset, result_path, args.log)
             if rc != 0:

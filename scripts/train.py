@@ -323,6 +323,7 @@ def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_di
     if "heads" in existing:
         existing["heads"].update(metadata["heads"])
 
+    os.makedirs(os.path.dirname(HEAD_METADATA), exist_ok=True)
     with open(HEAD_METADATA, "w", encoding="utf-8") as f:
         json.dump(existing, indent=4, fp=f)
         f.write("\n")
