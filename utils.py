@@ -483,7 +483,6 @@ def plot_score_space_fig7(
     *,
     svm_model=None,
     svm_input="scores",
-    svm_positive_label=1,
     svm_batch_size=50_000,
     attack_mode="all",
     title=None,
@@ -497,8 +496,8 @@ def plot_score_space_fig7(
     ``fusion="svm_rbf"``, the background and decision boundary are computed
     from a fitted probabilistic RBF-SVM supplied through ``svm_model``.
 
-    The SVM must be fitted before this function is called, preferably through
-    a pipeline containing any preprocessing used at training time.  Its two
+    ``svm_model`` must be a PyTorch ``nn.Module`` (e.g.
+    ``DifferentiableRBFSVMFusion`` or ``linear_fusion_from_sklearn``).  Its two
     input features must be ordered as ``[text, image]`` and must match
     ``svm_input``:
 
@@ -571,30 +570,14 @@ def plot_score_space_fig7(
     def _svm_scores(text_logits, image_logits):
         if svm_model is None:
             raise ValueError("svm_model is required when fusion='svm_rbf'")
-        if not hasattr(svm_model, "predict_proba"):
-            raise TypeError(
-                "svm_model must expose predict_proba; train SVC with probability=True"
-            )
-        if not hasattr(svm_model, "classes_"):
-            raise TypeError("svm_model must expose its fitted classes_ attribute")
-
-        class_indices = np.flatnonzero(
-            np.asarray(svm_model.classes_) == svm_positive_label
-        )
-        if class_indices.size != 1:
-            raise ValueError(
-                f"svm_positive_label={svm_positive_label} is not uniquely present "
-                f"in SVM classes {svm_model.classes_}"
-            )
-        positive_index = int(class_indices[0])
-
+        import torch as _torch
         features = _svm_features(text_logits, image_logits)
         scores = np.empty(features.shape[0], dtype=np.float64)
-        for start in range(0, features.shape[0], svm_batch_size):
-            stop = min(start + svm_batch_size, features.shape[0])
-            scores[start:stop] = svm_model.predict_proba(features[start:stop])[
-                :, positive_index
-            ]
+        with _torch.no_grad():
+            for start in range(0, features.shape[0], svm_batch_size):
+                stop = min(start + svm_batch_size, features.shape[0])
+                t = _torch.as_tensor(features[start:stop], dtype=_torch.float32)
+                scores[start:stop] = svm_model(t).numpy()
         return scores
 
     # Only include coordinates belonging to the selected scenario when the

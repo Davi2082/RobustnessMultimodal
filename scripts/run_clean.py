@@ -17,10 +17,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import joblib
 import numpy as np
 import pandas as pd
 
@@ -59,17 +59,13 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, head_dir, thres
     elif mode == "max":
         scores = np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        head_path = os.path.join(head_dir, f"{'svm_rbf' if mode == 'svm-rbf' else 'linear'}_head.pkl")
-        if not os.path.isfile(head_path):
-            print(f"  [SKIP] Fitted head not found: {head_path}")
+        from models.fusion import pytorch_head_score, fusion_head_path
+        if not os.path.isfile(fusion_head_path(mode)):
+            print(f"  [SKIP] Fitted head not found: {fusion_head_path(mode)}")
             print(f"         Run scripts/fit_fusion_heads.py first.")
             return
-        head = joblib.load(head_path)
         X = np.column_stack([s_txt, s_img])
-        if hasattr(head, "predict_proba"):
-            scores = head.predict_proba(X)[:, 1]
-        else:
-            scores = head.decision_function(X)
+        scores = pytorch_head_score(mode, X)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
@@ -120,6 +116,8 @@ def main():
     print(f"  Device: {args.device}")
     print("=" * 70)
 
+    t0 = time.time()
+
     # ── 1. Text-only ──
     print("\n[1/3] Text-only evaluation")
     run([
@@ -163,8 +161,9 @@ def main():
         print(f"\n  Late-fusion: {mode}")
         late_fusion_from_csvs(clean_text_csv, clean_image_csv, mode, output_dir, head_dir)
 
+    elapsed = time.time() - t0
     print("\n" + "=" * 70)
-    print("ALL CLEAN EVALUATIONS COMPLETE")
+    print(f"ALL CLEAN EVALUATIONS COMPLETE ({elapsed/60:.1f} min)")
     print("=" * 70)
 
 

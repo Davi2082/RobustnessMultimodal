@@ -21,7 +21,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from configuration_files.configuration import (
-    NAME_IMG_EMBED, FF_WEIGHTS_PATH, LATE_FUSION_SVM_INPUT,
+    NAME_IMG_EMBED, FF_WEIGHTS_PATH, LATE_FUSION_INPUT,
 )
 from configuration_files.paths import DATASET_WEIGHTS_DIR
 
@@ -38,8 +38,8 @@ def head_input_space() -> str:
     """Feature space the stored heads were fitted on."""
     if os.path.exists(HEAD_METADATA):
         with open(HEAD_METADATA, encoding="utf-8") as handle:
-            return json.load(handle).get("input_space", LATE_FUSION_SVM_INPUT)
-    return LATE_FUSION_SVM_INPUT
+            return json.load(handle).get("input_space", LATE_FUSION_INPUT)
+    return LATE_FUSION_INPUT
 
 
 LATE_FUSION_RULES = ("mean", "min", "max", "svm-rbf", "linear")
@@ -93,14 +93,23 @@ def model_args_from_parameters(
     )
 
 
-def load_fitted_heads():
-    """Return the persisted learned heads, or None when not fitted yet."""
-    heads = {}
-    for rule in LEARNED_RULES:
-        path = fusion_head_path(rule)
-        if os.path.exists(path):
-            heads[rule] = joblib.load(path)
-    return heads or None
+def load_pytorch_head(rule: str, device="cpu") -> torch.nn.Module:
+    """Load a fitted sklearn head and return the equivalent PyTorch module."""
+    path = fusion_head_path(rule)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No fitted {rule} head at {path}")
+    fitted = joblib.load(path)
+    if rule == "svm-rbf":
+        return DifferentiableRBFSVMFusion(fitted).to(device).eval()
+    return linear_fusion_from_sklearn(fitted).to(device).eval()
+
+
+def pytorch_head_score(rule: str, features, device="cpu"):
+    """Run a learned fusion head on numpy features, returning numpy scores."""
+    head = load_pytorch_head(rule, device)
+    with torch.no_grad():
+        t = torch.as_tensor(features, dtype=torch.float32, device=device)
+        return head(t).cpu().numpy()
 
 
 class DifferentiableRBFSVMFusion(torch.nn.Module):
@@ -168,25 +177,8 @@ class DifferentiableRBFSVMFusion(torch.nn.Module):
         self.register_buffer("prob_b",
                              torch.tensor(float(svc.probB_[0]), dtype=torch.float32))
 
-        # LibSVM's binary calibration orientation — established once against sklearn.
-        transformed_points = np.asarray(svc.support_vectors_[:min(32, len(svc.support_vectors_))])
-        raw_points = scaler.inverse_transform(transformed_points) if scaler is not None else transformed_points
-        decision = np.asarray(fitted_model.decision_function(raw_points)).reshape(-1)
-        calibrated = 1.0 / (1.0 + np.exp(np.clip(svc.probA_[0] * decision + svc.probB_[0], -80, 80)))
-
-        positive_column = int(np.flatnonzero(np.asarray(fitted_model.classes_) == 1)[0])
-        sklearn_probability = fitted_model.predict_proba(raw_points)[:, positive_column]
-
-        direct_error = float(np.mean(np.abs(calibrated - sklearn_probability)))
-        inverse_error = float(np.mean(np.abs((1.0 - calibrated) - sklearn_probability)))
-        self.invert_probability = inverse_error < direct_error
-
-        approximation_error = min(direct_error, inverse_error)
-        if approximation_error > 0.05:
-            raise ValueError(
-                f"The differentiable SVM probability does not match sklearn closely enough "
-                f"(mean absolute error={approximation_error:.4f})"
-            )
+        # libSVM's sigmoid outputs P(class_0); invert when class 1 is second.
+        self.invert_probability = svc.classes_[0] == 1
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """Return the differentiable probability of class 1."""
@@ -201,56 +193,34 @@ class DifferentiableRBFSVMFusion(torch.nn.Module):
         return probability
 
 
-class DifferentiableLinearFusion(torch.nn.Module):
-    """Differentiable form of a StandardScaler + LogisticRegression head."""
+def linear_fusion_from_sklearn(fitted_model: Any) -> torch.nn.Module:
+    """Build a torch.nn.Sequential (StandardScaler → Linear → Sigmoid) from a fitted sklearn pipeline."""
+    estimator = getattr(fitted_model, "best_estimator_", fitted_model)
+    steps = dict(getattr(estimator, "named_steps", {}))
+    scaler = steps.get("standardscaler") or steps.get("scaler")
+    lr = steps.get("lr") or steps.get("logisticregression")
+    if lr is None:
+        raise TypeError("The linear fusion head must be a Pipeline ending in LogisticRegression")
 
-    def __init__(self, fitted_model: Any):
-        super().__init__()
-        estimator = getattr(fitted_model, "best_estimator_", fitted_model)
-        steps = dict(getattr(estimator, "named_steps", {}))
-        scaler = steps.get("standardscaler") or steps.get("scaler")
-        linear = steps.get("lr") or steps.get("logisticregression")
+    classes = np.asarray(lr.classes_)
+    mean = torch.zeros(2)
+    scale = torch.ones(2)
+    if scaler is not None:
+        if getattr(scaler, "with_mean", True):
+            mean = torch.as_tensor(scaler.mean_, dtype=torch.float32)
+        if getattr(scaler, "with_std", True):
+            scale = torch.as_tensor(scaler.scale_, dtype=torch.float32)
 
-        if linear is None:
-            raise TypeError("The linear fusion head must be a Pipeline ending in LogisticRegression")
+    weight = torch.as_tensor(lr.coef_[0], dtype=torch.float32) / scale
+    bias = torch.tensor(float(lr.intercept_[0]) - (lr.coef_[0] @ (mean / scale).numpy()), dtype=torch.float32)
+    if int(classes[0]) == 1:
+        weight, bias = -weight, -bias
 
-        classes = np.asarray(linear.classes_)
-        if classes.size != 2 or 1 not in classes:
-            raise ValueError(f"The head must be binary and contain class 1; got {classes}")
+    linear = torch.nn.Linear(2, 1)
+    linear.weight.data = weight.unsqueeze(0)
+    linear.bias.data = bias.unsqueeze(0)
 
-        mean = np.zeros(2, dtype=np.float32)
-        scale = np.ones(2, dtype=np.float32)
-        if scaler is not None:
-            if getattr(scaler, "with_mean", True):
-                mean = np.asarray(scaler.mean_, dtype=np.float32)
-            if getattr(scaler, "with_std", True):
-                scale = np.asarray(scaler.scale_, dtype=np.float32)
-
-        weight = np.asarray(linear.coef_[0], dtype=np.float32)
-        bias = float(linear.intercept_[0])
-        if int(classes[0]) == 1:
-            weight, bias = -weight, -bias
-
-        self.register_buffer("mean", torch.as_tensor(mean))
-        self.register_buffer("scale", torch.as_tensor(scale))
-        self.register_buffer("weight", torch.as_tensor(weight))
-        self.register_buffer("bias", torch.tensor(bias, dtype=torch.float32))
-
-        probe = np.stack([mean, mean + scale, mean - scale]).astype(np.float64)
-        expected = estimator.predict_proba(probe)[:, list(classes).index(1)]
-        with torch.no_grad():
-            got = self(torch.as_tensor(probe, dtype=torch.float32)).numpy()
-        error = float(np.max(np.abs(got - expected)))
-        if error > 1e-4:
-            raise ValueError(
-                f"The differentiable linear head does not match sklearn (max absolute error={error:.6f})"
-            )
-
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
-        """Return the differentiable probability of class 1."""
-        features = features.to(dtype=self.weight.dtype)
-        transformed = (features - self.mean) / self.scale
-        return torch.sigmoid(transformed.matmul(self.weight) + self.bias)
+    return torch.nn.Sequential(linear, torch.nn.Sigmoid(), torch.nn.Flatten(0))
 
 
 class LateFusionClassifier(torch.nn.Module):
@@ -382,7 +352,7 @@ def build_classifier(args, device):
         fitted = joblib.load(head_path)
         fusion_head = (
             DifferentiableRBFSVMFusion(fitted) if args.fusion == "svm-rbf"
-            else DifferentiableLinearFusion(fitted)
+            else linear_fusion_from_sklearn(fitted)
         ).to(device)
 
     classifier = LateFusionClassifier(

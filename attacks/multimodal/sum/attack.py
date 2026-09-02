@@ -69,7 +69,7 @@ from configuration_files.configuration import (
     DEVICE_MLM,
     EPSILON,
     K_BERT_ATTACK,
-    LATE_FUSION_SVM_INPUT,
+    LATE_FUSION_INPUT,
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
     MAX_WORDS_TO_ATTACK,
@@ -224,7 +224,7 @@ def parse_args() -> tuple[
         "--svm_input",
         dest="svm_input",
         choices=("scores", "logits"),
-        default=LATE_FUSION_SVM_INPUT,
+        default=LATE_FUSION_INPUT,
     )
     model_group.add_argument(
         "--threshold",

@@ -23,7 +23,7 @@ N_TOKENS = 256
 THRESHOLD = 0.5
 
 # Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = 4 # None
+SUBSET_SIZE = 10 # None
 
 # Attack parameters
 SOURCE_LABEL = 0 # Fake
@@ -72,6 +72,6 @@ LATE_FUSION_BUDGET_DIVISOR = 2
 
 
 # The RBF-SVM is fitted on clean text/image predictions from the training set.
-LATE_FUSION_SVM_INPUT = "scores"
+LATE_FUSION_INPUT = "scores"
 LATE_FUSION_SVM_C = 1.0
 LATE_FUSION_SVM_GAMMA = "scale"

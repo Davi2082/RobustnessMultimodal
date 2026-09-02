@@ -2,7 +2,7 @@
 
 Neural models (text, image, feature-fusion) are trained via backpropagation.
 Learned fusion heads (svm-rbf, linear) are fitted on unimodal scores from the
-validation split and require existing text + image checkpoints.
+training split and require existing text + image checkpoints.
 
 Usage:
     python3 -m scripts.train --model text --dataset Recovery
@@ -221,12 +221,12 @@ def require_unimodal_checkpoints(dataset):
         )
 
 
-def collect_unimodal_scores(args, dataset_class, annotation_loader, val_file, image_dir):
-    """Run both unimodal models on val to get scores for fitting."""
+def collect_unimodal_scores(args, dataset_class, annotation_loader, data_file, image_dir, split_name="train"):
+    """Run both unimodal models on a data split to collect posterior scores."""
     device = torch.device(args.device)
     dataset_classes, load_functions = load_available_datasets()
 
-    all_labels, all_text_scores, all_image_scores = [], [], []
+    all_labels, all_text_scores, all_image_scores = None, None, None
 
     unimodal_paths = {"text": TEXT_WEIGHTS_PATH, "image": IMAGE_WEIGHTS_PATH}
     for modality in ("text", "image"):
@@ -241,13 +241,13 @@ def collect_unimodal_scores(args, dataset_class, annotation_loader, val_file, im
 
         dataset = my_datasets.get_dataset(
             dataset_class, annotation_loader, args.n_tokens,
-            processor, tokenizer, str(val_file), str(image_dir),
+            processor, tokenizer, str(data_file), str(image_dir),
         )
         loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
         scores_list, labels_list = [], []
         with torch.no_grad():
-            for images, labels, texts, _, _ in tqdm(loader, desc=f"val/{modality}"):
+            for images, labels, texts, _, _ in tqdm(loader, desc=f"{split_name}/{modality}"):
                 images, texts = images.to(device), texts.to(device)
                 if modality == "text":
                     batch_scores, _ = model(images=None, texts=texts)
@@ -268,17 +268,17 @@ def collect_unimodal_scores(args, dataset_class, annotation_loader, val_file, im
     return all_labels, all_text_scores, all_image_scores
 
 
-def fit_fusion_head(args, dataset_class, annotation_loader, val_file, image_dir):
-    """Fit an SVM-RBF or linear fusion head on unimodal scores."""
+def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_dir):
+    """Fit an SVM-RBF or linear fusion head on unimodal scores from the training split."""
     require_unimodal_checkpoints(args.dataset)
 
     labels, text_scores, image_scores = collect_unimodal_scores(
-        args, dataset_class, annotation_loader, val_file, image_dir,
+        args, dataset_class, annotation_loader, train_file, image_dir, split_name="train",
     )
     features = np.column_stack([text_scores, image_scores])
     n_fake = int((labels == 0).sum())
     n_real = int((labels == 1).sum())
-    print(f"Fitting on {len(labels)} val samples ({n_fake} fake / {n_real} real)")
+    print(f"Fitting on {len(labels)} train samples ({n_fake} fake / {n_real} real)")
 
     seed = args.seed
     folds = StratifiedKFold(5, shuffle=True, random_state=seed)
@@ -303,7 +303,7 @@ def fit_fusion_head(args, dataset_class, annotation_loader, val_file, image_dir)
     print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
 
     metadata = {
-        "split": "val",
+        "split": "train",
         "input_space": "scores",
         "seed": seed,
         "n_samples": int(len(labels)),
@@ -389,7 +389,7 @@ def train_one(args, model_name, dataset_class, annotation_loader, train_file, va
     if model_name in NEURAL_MODELS:
         train_neural(args, dataset_class, annotation_loader, train_file, val_file, image_dir)
     else:
-        fit_fusion_head(args, dataset_class, annotation_loader, val_file, image_dir)
+        fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_dir)
 
 
 def main():

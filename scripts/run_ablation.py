@@ -15,10 +15,10 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
@@ -46,15 +46,11 @@ def fuse_scores(s_txt, s_img, mode, head_dir):
     elif mode == "max":
         return np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        slug = "svm_rbf" if mode == "svm-rbf" else "linear"
-        head_path = os.path.join(head_dir, f"{slug}_head.pkl")
-        if not os.path.isfile(head_path):
+        from models.fusion import pytorch_head_score, fusion_head_path
+        if not os.path.isfile(fusion_head_path(mode)):
             return None
-        head = joblib.load(head_path)
         X = np.column_stack([s_txt, s_img])
-        if hasattr(head, "predict_proba"):
-            return head.predict_proba(X)[:, 1]
-        return head.decision_function(X)
+        return pytorch_head_score(mode, X)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
@@ -132,6 +128,8 @@ def main():
     print(f"  Device: {args.device}")
     print("=" * 70)
 
+    t0 = time.time()
+
     # ── 1. Feature-fusion ablation (blank + drop) ──
     print("\n[1/2] Feature-fusion modality ablation")
     run([
@@ -153,8 +151,9 @@ def main():
 
     late_fusion_ablation(clean_text_csv, clean_image_csv, head_dir, head_dir)
 
+    elapsed = time.time() - t0
     print("\n" + "=" * 70)
-    print("ABLATION COMPLETE")
+    print(f"ABLATION COMPLETE ({elapsed/60:.1f} min)")
     print("=" * 70)
 
 
