@@ -48,18 +48,16 @@ CS = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
 def split_path(dataset: str, split: str) -> str:
     """Annotation file for a split, tolerating the two data roots in use."""
     name = SPLIT_FILES[split]
-    for root in (f"data/{dataset}", f"data_loading/{dataset}"):
-        candidate = os.path.join(root, name)
-        if os.path.exists(candidate):
-            return candidate
-    raise FileNotFoundError(f"No {name} under data/{dataset} or data_loading/{dataset}")
+    candidate = os.path.join(f"data/{dataset}", name)
+    if os.path.exists(candidate):
+        return candidate
+    raise FileNotFoundError(f"No {name} under data/{dataset}")
 
 
 def images_dir(dataset: str) -> str:
-    for root in (f"data/{dataset}", f"data_loading/{dataset}"):
-        candidate = os.path.join(root, "images")
-        if os.path.isdir(candidate):
-            return candidate
+    candidate = os.path.join(f"data/{dataset}", "images")
+    if os.path.isdir(candidate):
+        return candidate
     raise FileNotFoundError(f"No images directory for {dataset}")
 
 

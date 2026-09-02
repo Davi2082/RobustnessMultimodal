@@ -93,8 +93,8 @@ def main():
         args.n_tokens,
         processor,
         tokenizer,
-        glob.glob(f"data_loading/{args.dataset}/test.*")[0],
-        f"data_loading/{args.dataset}/images",
+        glob.glob(f"data/{args.dataset}/test.*")[0],
+        f"data/{args.dataset}/images",
     )
     
     # Dataloader creation (optionally restricted to the first N samples for quick tests)

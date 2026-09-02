@@ -44,7 +44,7 @@ from models.themis_model import get_Themis
 from utils import load_available_datasets, load_model
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_ROOT = ROOT / "data_loading"
+DATA_ROOT = ROOT / "data"
 
 NEURAL_MODELS = ("text", "image", "feature-fusion")
 FUSION_HEADS = ("svm-rbf", "linear")

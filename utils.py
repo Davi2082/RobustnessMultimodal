@@ -57,7 +57,7 @@ def cleanup_cuda(*objs):
 
 def load_available_datasets():
     # Get available datasets from Data directory
-    available_datasets = [d for d in os.listdir("data_loading") if os.path.isdir(os.path.join("data_loading", d)) and not d.startswith((".", "_"))]
+    available_datasets = [d for d in os.listdir("data") if os.path.isdir(os.path.join("data", d)) and not d.startswith((".", "_"))]
     # Create mappings dynamically
     dataset_classes = {}
     load_functions = {}
@@ -827,8 +827,8 @@ def compute_threshold(model, processor, tokenizer, device, args, model2=None, mo
         args.n_tokens,
         processor,
         tokenizer,
-        glob.glob(f"data_loading/{args.dataset}/val_augmented.*")[0],
-        f"data_loading/{args.dataset}/images",
+        glob.glob(f"data/{args.dataset}/val_augmented.*")[0],
+        f"data/{args.dataset}/images",
     )
     
     dataloader_val = DataLoader(

@@ -24,8 +24,8 @@ TRAIN_IMAGE_CSV = os.path.join(TRAIN_BASE, "image", "results.csv")
 TRAIN_SVM_MODEL = os.path.join(TRAIN_BASE, "svm_rbf.joblib")
 
 # Dataset training data
-TRAIN_DATA_CSV = f"data_loading/{DATASET}/train_augmented.csv"
-TRAIN_IMAGES_DIR = f"data_loading/{DATASET}/images"
+TRAIN_DATA_CSV = f"data/{DATASET}/train_augmented.csv"
+TRAIN_IMAGES_DIR = f"data/{DATASET}/images"
 
 # Clean - CSVs
 CLEAN_TEXT_CSV  = os.path.join(CLEAN_BASE, "text",  "results.csv")
@@ -106,7 +106,7 @@ def late_fusion_result_path(
 
 # Annotations and images are split across two roots on this branch; resolve
 # either so no driver has to guess which one holds a given dataset.
-DATASET_ROOTS = ("data", "data_loading")
+DATASET_ROOTS = ("data",)
 
 
 def dataset_images_dir(dataset):

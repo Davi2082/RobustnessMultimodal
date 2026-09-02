@@ -246,7 +246,7 @@ def parse_args() -> tuple[
         default=None,
         help=(
             "Test annotation file. "
-            "By default data_loading/<dataset>/test.* is used."
+            "By default data/<dataset>/test.* is used."
         ),
     )
     data_group.add_argument(
@@ -257,7 +257,7 @@ def parse_args() -> tuple[
         default=None,
         help=(
             "Image directory. "
-            "By default data_loading/<dataset>/images is used."
+            "By default data/<dataset>/images is used."
         ),
     )
     data_group.add_argument(
@@ -1211,7 +1211,7 @@ def main() -> None:
     if args.test_data is None:
         candidates = sorted(
             glob.glob(
-                f"data_loading/{args.dataset}/test.*"
+                f"data/{args.dataset}/test.*"
             )
         )
 
