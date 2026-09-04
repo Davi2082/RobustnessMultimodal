@@ -26,7 +26,7 @@ from configuration_files.configuration import (
 from configuration_files.paths import DATASET_WEIGHTS_DIR
 
 HEAD_FILES = {"svm-rbf": "svm_rbf_head.pkl", "linear": "linear_head.pkl"}
-HEAD_METADATA = os.path.join("results", DATASET, "classification_results", "fusion_heads.json")
+HEAD_METADATA = os.path.join(DATASET_WEIGHTS_DIR, "fusion_heads.json")
 
 
 def fusion_head_path(rule: str) -> str:

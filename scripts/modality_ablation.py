@@ -173,23 +173,33 @@ def main():
         out[col] = torch.cat(chunks).numpy()
     df = pd.DataFrame(out)
 
-    output_dir = os.path.join(args.results_path, "fusion_analysis")
+    output_dir = os.path.join(args.results_path, "ablation", args.modality)
     os.makedirs(output_dir, exist_ok=True)
-    stem = f"{args.modality}_modality_ablation"
+    stem = "modality_ablation"
     csv_path = os.path.join(output_dir, f"{stem}.csv")
     df.to_csv(csv_path, index=False)
 
     # ---------- Table 2 ----------
     label = df["label"].values
+    condition_map = {"both": "both", "img_only": "image_only", "txt_only": "text_only"}
     summary = []
     for mode in ("blank", "drop"):
-        pretty_names = {"both": "both modalities",
-                        "img_only": "text ablated (image only)",
-                        "txt_only": "image ablated (text only)"}
-        for name, pretty in [(n, pretty_names[n]) for n, _ in conditions]:
+        base_auc = base_f1 = base_acc = None
+        for name, _ in conditions:
             auc, f1, acc = metrics(label, df[f"{mode}_score_{name}"].values, args.threshold)
-            summary.append({"ablation mode": mode, "condition": pretty,
-                            "AUC": round(auc, 4), "F1_fake": round(f1, 4), "Acc": round(acc, 4)})
+            cond = condition_map[name]
+            row = {
+                "method": f"{args.modality} ({mode})",
+                "condition": cond,
+                "AUC": round(auc, 3), "F1": round(f1, 3), "Acc": round(acc, 3),
+            }
+            if cond == "both":
+                base_auc, base_f1, base_acc = auc, f1, acc
+            else:
+                row["dAUC"] = round(auc - base_auc, 3)
+                row["dF1"] = round(f1 - base_f1, 3)
+                row["dAcc"] = round(acc - base_acc, 3)
+            summary.append(row)
     summary = pd.DataFrame(summary)
     summary.to_csv(os.path.join(output_dir, f"{stem}_metrics.csv"), index=False)
 

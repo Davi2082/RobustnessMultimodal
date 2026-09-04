@@ -105,7 +105,7 @@ def late_fusion_ablation(text_csv, image_csv, output_dir, head_dir):
 
     df = pd.DataFrame(rows)
     os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, "late_fusion_modality_ablation.csv")
+    csv_path = os.path.join(output_dir, "modality_ablation.csv")
     df.to_csv(csv_path, index=False)
     print(f"\n  Saved to {csv_path}")
     print(df.to_string(index=False))
@@ -132,11 +132,11 @@ def main():
 
     t0 = time.time()
 
-    ablation_output_dir = os.path.join(result_path, "ablation")
-    ablation_csv = os.path.join(ablation_output_dir, "late_fusion_modality_ablation.csv")
+    ff_ablation_dir = os.path.join(result_path, "ablation", "feature-fusion")
+    lf_ablation_dir = os.path.join(result_path, "ablation", "late-fusion")
 
     # ── 1. Feature-fusion ablation (blank + drop) ──
-    ff_ablation_csv = os.path.join(ablation_output_dir, "feature_fusion_modality_ablation.csv")
+    ff_ablation_csv = os.path.join(ff_ablation_dir, "modality_ablation.csv")
     if args.force or not os.path.isfile(ff_ablation_csv):
         print("\n[1/2] Feature-fusion modality ablation")
         run([
@@ -148,7 +148,8 @@ def main():
         print("\n[1/2] Feature-fusion ablation — SKIP (use --force to re-run)")
 
     # ── 2. Late-fusion ablation ──
-    if not args.force and os.path.isfile(ablation_csv):
+    lf_ablation_csv = os.path.join(lf_ablation_dir, "modality_ablation.csv")
+    if not args.force and os.path.isfile(lf_ablation_csv):
         print("\n[2/2] Late-fusion ablation — SKIP (use --force to re-run)")
     else:
         print("\n[2/2] Late-fusion modality ablation")
@@ -161,7 +162,21 @@ def main():
             print("       Run scripts.run_clean first.")
             sys.exit(1)
 
-        late_fusion_ablation(clean_text_csv, clean_image_csv, ablation_output_dir, head_dir)
+        late_fusion_ablation(clean_text_csv, clean_image_csv, lf_ablation_dir, head_dir)
+
+    # ── Combined summary ──
+    ff_metrics_csv = os.path.join(ff_ablation_dir, "modality_ablation_metrics.csv")
+    dfs = []
+    if os.path.isfile(ff_metrics_csv):
+        dfs.append(pd.read_csv(ff_metrics_csv))
+    if os.path.isfile(lf_ablation_csv):
+        dfs.append(pd.read_csv(lf_ablation_csv))
+    if dfs:
+        combined = pd.concat(dfs, ignore_index=True)
+        print("\n" + "=" * 70)
+        print("COMBINED ABLATION RESULTS")
+        print("=" * 70)
+        print(combined.to_string(index=False))
 
     elapsed = time.time() - t0
     print("\n" + "=" * 70)
