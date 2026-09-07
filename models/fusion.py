@@ -323,7 +323,7 @@ class FeatureFusionClassifier(torch.nn.Module):
 
 def build_classifier(args, device):
     """Return the classifier named by ``args.fusion``."""
-    from utils import load_model
+    from scripts.utils.utils import load_model
 
     if args.fusion == "feature-fusion":
         ff_args = model_args_from_parameters(

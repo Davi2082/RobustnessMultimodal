@@ -1,0 +1,16 @@
+{
+    "Modality": "image",
+    "Name LLM": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "Image Embedder Name": "openai/clip-vit-base-patch32",
+    "Batch Size": 128,
+    "Number of Tokens": 256,
+    "Dataset": "Recovery",
+    "Model Path": "checkpoints/Recovery/clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt",
+    "Merge Tokens": null,
+    "LoRA Alpha": 8,
+    "LoRA R": 8,
+    "LoRA Dropout": 0.4,
+    "Use LoRA": true,
+    "Set Params": false,
+    "Threshold": 0.5
+}

@@ -19,7 +19,7 @@ from attacks.attack_algorithms.text.BERTATTACK.attack import (
     bertattack as bertattack_attack,
 )
 from attacks.attack_algorithms.text.TREPAT.attack import trepat_attack
-from utils import (
+from scripts.utils.utils import (
     load_model,
     use_model,
     load_available_datasets,
@@ -37,7 +37,7 @@ from configuration_files.configuration import (
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
     MIN_TXT_SIMILARITY,
-    DEVICE,
+    DEVICES,
     DEVICE_MLM,
     SUBSET_SIZE,
 )
@@ -92,7 +92,7 @@ def main():
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device(DEVICE)
+    device = torch.device(DEVICES[0])
     device_mlm = torch.device(DEVICE_MLM)
 
     # Model with relative tokenizer and processor loading

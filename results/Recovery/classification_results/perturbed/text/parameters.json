@@ -1,0 +1,28 @@
+{
+    "Model Parameters": {
+        "Modality": "text",
+        "Name LLM": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "Image Embedder Name": "openai/clip-vit-large-patch14",
+        "Batch Size": 128,
+        "Number of Tokens": 256,
+        "Dataset": "Recovery",
+        "Model Path": "model/clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt",
+        "Merge Tokens": null,
+        "LoRA Alpha": 8,
+        "LoRA R": 8,
+        "LoRA Dropout": 0.4,
+        "Use LoRA": true,
+        "Set Params": true,
+        "Threshold": 0.5
+    },
+    "Attack Parameters": {
+        "Targeted": false,
+        "Source Label": "all (per-sample 1-label)",
+        "Target Label": "all (per-sample 1-label)",
+        "K (BERT Attack)": 48,
+        "Threshold Pred Score": 0,
+        "Max Words to Attack": 1024,
+        "Max Candidates per Word": 64,
+        "Max Words for Importance": 1024
+    }
+}

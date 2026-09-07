@@ -47,7 +47,7 @@ from models.fusion import (
     read_parameters,
 )
 from configuration_files.configuration import (
-    DEVICE,
+    DEVICES,
     EPSILON,
     MAX_CHANGE_RATIO,
     MIN_TXT_SIMILARITY,
@@ -66,7 +66,7 @@ from configuration_files.paths import (
     RESULT_PATH,
     late_fusion_scenario_path,
 )
-from utils import (
+from scripts.utils.utils import (
     load_available_datasets,
     load_model,
     save_perturbed_image,
@@ -379,7 +379,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     parser.add_argument("--subset-size", type=int, default=SUBSET_SIZE)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--device", default=DEVICE)
+    parser.add_argument("--device", default=DEVICES[0])
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--dump-dir", type=Path, default=None)
     parser.add_argument("--results-path", type=Path, default=Path(RESULT_PATH))

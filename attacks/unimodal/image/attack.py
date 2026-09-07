@@ -15,7 +15,7 @@ from tqdm import tqdm
 # Custom imports
 from attacks.attack_algorithms.img.PGD.pgd import img_perturbation
 from attacks.attack_algorithms.text.BERTATTACK.attack import bertattack
-from utils import (
+from scripts.utils.utils import (
     load_model,
     use_model,
     load_available_datasets,
@@ -28,7 +28,7 @@ from configuration_files.configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
-    DEVICE,
+    DEVICES,
     SUBSET_SIZE,
 )
 from configuration_files.paths import RESULT_PATH, CLEAN_IMAGE_PARAMS, DATA_PERTURBED_IMAGE
@@ -73,7 +73,7 @@ def main():
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device(DEVICE)
+    device = torch.device(DEVICES[0])
 
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)

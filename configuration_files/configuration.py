@@ -12,10 +12,9 @@ TEXT_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-large-patch14
 IMAGE_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
-# CUDA devices — set DEVICE_MLM to a second GPU to parallelize text attacks
-DEVICE = "cuda:0"      # main model (eval + attacks)
-DEVICE_EVAL = "cuda:0" # clean eval
-DEVICE_MLM = "cuda:0"  # TREPAT rewriter / BERT MLM; set to "cuda:1" for multi-GPU
+# CUDA devices — CLI --devices overrides; set multiple for DataParallel / multi-GPU
+DEVICES = ["cuda:1"]   # default GPU list; first entry is the primary device
+DEVICE_MLM = "cuda:1"  # TREPAT rewriter / BERT MLM; set to a second GPU to parallelize text attacks
 
 # Model parameters
 BATCH_SIZE = 128

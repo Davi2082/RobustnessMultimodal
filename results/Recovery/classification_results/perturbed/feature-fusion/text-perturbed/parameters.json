@@ -1,0 +1,33 @@
+{
+    "Model Parameters": {
+        "Modality": "feature-fusion",
+        "Name LLM": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "Image Embedder Name": "openai/clip-vit-large-patch14",
+        "Batch Size": 128,
+        "Number of Tokens": 256,
+        "Dataset": "Recovery",
+        "Model Path": "model/clip-vit-base-patch32_None_8_8_0.4_True10_best.pt",
+        "Merge Tokens": null,
+        "LoRA Alpha": 8,
+        "LoRA R": 8,
+        "LoRA Dropout": 0.4,
+        "Use LoRA": true,
+        "Set Params": true,
+        "Threshold": 0.5
+    },
+    "Attack Parameters": {
+        "Targeted": false,
+        "Source Label": "all (per-sample 1-label)",
+        "Target Label": "all (per-sample 1-label)",
+        "Attack Scope": "text",
+        "Alternation": false,
+        "Budget Divisor": 1,
+        "PGD Iters": null,
+        "TREPAT Max Variants": 100,
+        "Epsilon": 0.06274509803921569,
+        "Alpha Factor": 0.4,
+        "TREPAT Command": "INFORMAL",
+        "K (BERT Attack)": 48,
+        "Threshold Pred Score": 0
+    }
+}

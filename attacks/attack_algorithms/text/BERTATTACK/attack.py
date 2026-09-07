@@ -12,7 +12,7 @@ from sentence_transformers import util
 from attacks.attack_algorithms.text.BERTATTACK import bertattack as bert_attack
 from attacks.attack_algorithms.text.common import model_sbert
 from configuration_files.configuration import MAX_CHANGE_RATIO, USE_BPE
-from utils import cleanup_cuda
+from scripts.utils.utils import cleanup_cuda
 
 
 class BertAttackThemisWrapper(torch.nn.Module):

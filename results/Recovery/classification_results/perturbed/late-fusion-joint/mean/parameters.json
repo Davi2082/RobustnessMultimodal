@@ -1,0 +1,61 @@
+{
+    "Fusion": {
+        "Type": "mean",
+        "Threshold": 0.5
+    },
+    "Scenario": "both",
+    "Attack": {
+        "Objective": "fused score, shared backward pass",
+        "Method": "hotflip+pgd",
+        "Independent Modalities": false,
+        "Joint Optimization": true,
+        "Iterations": 50,
+        "Budget Divisor": 1,
+        "Epsilon": 0.06274509803921569,
+        "Alpha": 0.003137254901960784,
+        "Random Start": true,
+        "Max Change Ratio": 0.4,
+        "Verified Candidates": 8,
+        "Text Patience": 3,
+        "ASCII Candidates Only": true,
+        "Whole-Word Flips": true,
+        "Minimum Text Similarity": 0.0,
+        "Targeted": false,
+        "Source Label": "all (per-sample 1-label)",
+        "Target Label": "all (per-sample 1-label)",
+        "Only Clean-Correct Samples": true,
+        "Number of Tokens": 256
+    },
+    "Text Model Parameters": {
+        "Modality": "text",
+        "Name LLM": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "Image Embedder Name": "openai/clip-vit-base-patch32",
+        "Batch Size": 128,
+        "Number of Tokens": 256,
+        "Dataset": "Recovery",
+        "Model Path": "checkpoints/Recovery/clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt",
+        "Merge Tokens": null,
+        "LoRA Alpha": 8,
+        "LoRA R": 8,
+        "LoRA Dropout": 0.4,
+        "Use LoRA": true,
+        "Set Params": false,
+        "Threshold": 0.5
+    },
+    "Image Model Parameters": {
+        "Modality": "image",
+        "Name LLM": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "Image Embedder Name": "openai/clip-vit-base-patch32",
+        "Batch Size": 128,
+        "Number of Tokens": 256,
+        "Dataset": "Recovery",
+        "Model Path": "checkpoints/Recovery/clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt",
+        "Merge Tokens": null,
+        "LoRA Alpha": 8,
+        "LoRA R": 8,
+        "LoRA Dropout": 0.4,
+        "Use LoRA": true,
+        "Set Params": false,
+        "Threshold": 0.5
+    }
+}

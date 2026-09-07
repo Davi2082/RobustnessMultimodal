@@ -65,7 +65,7 @@ from configuration_files.configuration import (
     ALPHA_FACTOR,
     ATTACK_MODEL,
     COMMAND,
-    DEVICE,
+    DEVICES,
     DEVICE_MLM,
     EPSILON,
     K_BERT_ATTACK,
@@ -130,7 +130,7 @@ from models.fusion import (
     model_args_from_parameters,
     read_parameters,
 )
-from utils import (
+from scripts.utils.utils import (
     load_available_datasets,
     load_model,
     save_perturbed_image,
@@ -441,6 +441,13 @@ def parse_args() -> tuple[
         type=float,
         default=MIN_TXT_SIMILARITY,
     )
+
+    device_group = parser.add_argument_group("devices")
+    device_group.add_argument("--device", default=DEVICES[0],
+                              help="Main classifier device (default: from config).")
+    device_group.add_argument("--device-mlm", "--device_mlm",
+                              dest="device_mlm", default=DEVICE_MLM,
+                              help="MLM / rephraser device (default: from config).")
 
     args = parser.parse_args()
 
@@ -1154,8 +1161,8 @@ def main() -> None:
         image_parameters,
     )
 
-    device = torch.device(DEVICE)
-    device_mlm = torch.device(DEVICE_MLM)
+    device = torch.device(args.device)
+    device_mlm = torch.device(args.device_mlm)
 
     # Model in: one call covers late fusion (two unimodal checkpoints plus a
     # rule) and feature fusion (one jointly trained checkpoint), so neither

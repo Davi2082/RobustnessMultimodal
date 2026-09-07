@@ -9,17 +9,17 @@ _*
 data_perturbed/
 data_loading/Fakeddit/images/
 data_loading/Recovery/images/
-results/
 models/weights/
 logs/
 figures/
 venv/
-*/
+data/
+checkpoints/
+!scripts/*
 
 # Local scripts
 *.sh
 !run_script.sh
 
 # Local python scripts
-*.py
 !utils.py

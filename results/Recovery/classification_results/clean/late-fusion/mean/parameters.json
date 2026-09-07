@@ -1,0 +1,7 @@
+{
+    "Modality": "late-fusion",
+    "Fusion Mode": "mean",
+    "Threshold": 0.5,
+    "Text CSV": "results/Recovery/classification_results/clean/text/results.csv",
+    "Image CSV": "results/Recovery/classification_results/clean/image/results.csv"
+}

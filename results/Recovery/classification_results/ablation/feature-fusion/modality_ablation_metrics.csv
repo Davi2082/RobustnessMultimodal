@@ -1,0 +1,7 @@
+ablation mode,condition,AUC,F1_fake,Acc
+blank,both modalities,0.9885,0.8,0.9329
+blank,text ablated (image only),0.8148,0.4486,0.7915
+blank,image ablated (text only),0.3071,0.1561,0.3887
+drop,both modalities,0.9885,0.8,0.9329
+drop,text ablated (image only),0.8092,0.4308,0.7385
+drop,image ablated (text only),0.527,0.2463,0.2862
