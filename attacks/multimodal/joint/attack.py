@@ -258,9 +258,12 @@ def joint_attack(
                             {"input_ids": proposals.unsqueeze(1)},
                         )
                     candidate_scores = candidate_scores.reshape(-1)
-                    winner = int(torch.argmax(candidate_scores).item())
+                    # Convert to target probability so selection
+                    # respects the attack direction for both classes.
+                    candidate_tp = candidate_scores if escaping_fake else 1.0 - candidate_scores
+                    winner = int(torch.argmax(candidate_tp).item())
 
-                    if float(candidate_scores[winner].item()) <= current:
+                    if float(candidate_tp[winner].item()) <= current:
                         text_failures += 1
                         if text_failures >= args.text_patience:
                             text_exhausted = True

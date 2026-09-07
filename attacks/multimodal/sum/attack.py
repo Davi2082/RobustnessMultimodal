@@ -1789,8 +1789,9 @@ def main() -> None:
             perturbed_text_rows,
         )
 
+    mode_desc = "targeted (fake→real)" if args.targeted else "untargeted (all clean-correct)"
     print(
-        f"Attacked {attacked_samples} source-class samples "
+        f"Attacked {attacked_samples}/{len(y_true)} samples ({mode_desc}) "
         f"using the {args.fusion} fused score."
     )
 
