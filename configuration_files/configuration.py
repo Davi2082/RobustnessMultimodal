@@ -7,8 +7,9 @@ DATASET = "Recovery"  # default dataset for training and evaluation
 
 # Models
 NAME_LLM = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-NAME_IMG_EMBED = "openai/clip-vit-base-patch32" # NAME_IMG_EMBED = "openai/clip-vit-large-patch14"
-TEXT_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt")
+NAME_IMG_EMBED = "openai/clip-vit-base-patch32"
+TEXT_ENCODER = {"Recovery": "clip-vit-large-patch14", "Fakeddit": "clip-vit-base-patch32"}
+TEXT_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, f"{TEXT_ENCODER[DATASET]}_None_8_8_0.4_True10_best_txt_only.pt")
 IMAGE_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join("checkpoints", DATASET, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
