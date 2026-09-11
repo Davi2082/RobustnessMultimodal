@@ -34,7 +34,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    BATCH_SIZE, DATASET, FF_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH, DEVICES
+    BATCH_SIZE, DATASET, FF_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH, DEVICES,
     NAME_IMG_EMBED, NAME_LLM, N_TOKENS, RAND_SEED, TEXT_WEIGHTS_PATH,
 )
 from configuration_files.paths import DATASET_WEIGHTS_DIR

@@ -263,13 +263,11 @@ def load_model(device, args, correct_model_path=None):
     )
 
     if os.path.exists(args.model_path):
-        try:
-            # when a serious GPU will be available change map_location to device
-            model.load_state_dict(torch.load(args.model_path, map_location=device))
-        except Exception:
-            error("Error loading weights, it will be used random weights. The results will be meaningless.")
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
     else:
-        warning("Warning: weights file not found, using random weights. The results will be meaningless.")
+        raise FileNotFoundError(
+            f"Weights file not found: {args.model_path}"
+        )
 
     model.to(device).eval()
 

@@ -53,17 +53,19 @@ def main():
     parser.add_argument("--lora_dropout", type=float, default=0.4)
     parser.add_argument("--use_lora", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--set_params", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--results_path", type=str, default=RESULT_PATH)
+    parser.add_argument("--results_path", type=str, default=None)
     parser.add_argument("--dataset", type=str, default="Recovery", choices=list(dataset_classes.keys()))
     parser.add_argument("--devices", nargs="+", default=DEVICES,
                         help="GPU device(s): cuda:0 cuda:1 ... or 'all'.")
     args = parser.parse_args()
 
+    if args.results_path is None:
+        args.results_path = f"results/{args.dataset}/classification_results"
+
     # "Parameters" will be the dictionary that will be saved in the json file with the evaluation parameters
     parameters = {
         "Modality": args.modality,
         "Name LLM": args.name_llm,
-        "Image Embedder Name": args.name_img_embed,
         "Batch Size": args.batch_size,
         "Number of Tokens": args.n_tokens,
         "Dataset": args.dataset,
@@ -100,7 +102,9 @@ def main():
         if device_ids:
             model = torch.nn.DataParallel(model, device_ids=device_ids)
     
-    # Other parameters saved in the parameters dictionary
+    # Other parameters saved in the parameters dictionary (after load_model which
+    # overrides name_img_embed from the checkpoint filename)
+    parameters["Image Embedder Name"] = args.name_img_embed
     parameters["Model Path"] = args.model_path
     parameters["Merge Tokens"] = args.merge_tokens
     parameters["LoRA Alpha"] = args.lora_alpha
