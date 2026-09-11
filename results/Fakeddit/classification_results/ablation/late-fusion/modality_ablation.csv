@@ -1,0 +1,16 @@
+method,condition,AUC,F1,Acc,dAUC,dF1,dAcc
+min,both,1.0,1.0,1.0,,,
+min,image_only,0.75,0.667,0.8,-0.25,-0.333,-0.2
+min,text_only,1.0,1.0,1.0,0.0,0.0,0.0
+mean,both,1.0,1.0,1.0,,,
+mean,image_only,1.0,0.667,0.8,0.0,-0.333,-0.2
+mean,text_only,1.0,1.0,1.0,0.0,0.0,0.0
+max,both,1.0,0.667,0.8,,,
+max,image_only,1.0,0.0,0.6,0.0,-0.667,-0.2
+max,text_only,1.0,0.0,0.6,0.0,-0.667,-0.2
+svm-rbf,both,1.0,1.0,1.0,,,
+svm-rbf,image_only,1.0,0.8,0.8,0.0,-0.2,-0.2
+svm-rbf,text_only,1.0,1.0,1.0,0.0,0.0,0.0
+linear,both,1.0,1.0,1.0,,,
+linear,image_only,1.0,0.667,0.8,0.0,-0.333,-0.2
+linear,text_only,1.0,1.0,1.0,0.0,0.0,0.0

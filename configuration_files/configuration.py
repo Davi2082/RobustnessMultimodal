@@ -3,7 +3,7 @@ import os
 RAND_SEED = 42
 
 # Dataset selection
-DATASET = "Recovery"  # default dataset for training and evaluation
+DATASET = "Fakeddit"  # default dataset for training and evaluation
 
 # Models
 NAME_LLM = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"

@@ -14,20 +14,21 @@ ATTACKS=(pgd trepat sum interleaved joint)
 M="python3 -m scripts.utils.metrics"
 
 run_pipeline() {
-    local DATASET=$1
-    local DEVICES=$2  # space-separated device list or "all"
+    # modify in configuration_files/configuration.py
+    local DATASET=$(python3 -c 'import configuration_files.configuration.DATASET; print(DATASET)')
+    local DEVICES=$(python3 -c 'import configuration_files.configuration.DEVICES; print(DEVICES)') #space-separated device list or "all"
 
     echo ""
     echo "======================================================================"
     echo "PIPELINE: $DATASET  devices=$DEVICES"
     echo "======================================================================"
 
-    # # 0. Train if necessary
-    # python3 -m scripts.train_scripts.train --model svm-rbf --dataset $DATASET --devices $DEVICES --force
-    # python3 -m scripts.train_scripts.train --model linear --dataset $DATASET --devices $DEVICES --force
+    # 0. Train if necessary
+    python3 -m scripts.train_scripts.train --model svm-rbf --dataset $DATASET --devices $DEVICES --force
+    python3 -m scripts.train_scripts.train --model linear --dataset $DATASET --devices $DEVICES --force
 
-    # # 1. Clean eval (text, image, feature-fusion, all late-fusion modes)
-    # python3 -m scripts.main_scripts.run_clean --dataset $DATASET --devices $DEVICES --force
+    # 1. Clean eval (text, image, feature-fusion, all late-fusion modes)
+    python3 -m scripts.main_scripts.run_clean --dataset $DATASET --devices $DEVICES --force
 
     # # 2. Missing-modality ablation (feature-fusion + late-fusion)
     # python3 -m scripts.main_scripts.run_ablation --dataset $DATASET --devices $DEVICES --force
@@ -68,8 +69,8 @@ run_pipeline() {
     done
 }
 
-run_pipeline "Recovery" "all" &
-# run_pipeline "Fakeddit" "all" &
+# run_pipeline "Recovery" "all" &
+run_pipeline "Fakeddit" "all" &
 
 wait
 

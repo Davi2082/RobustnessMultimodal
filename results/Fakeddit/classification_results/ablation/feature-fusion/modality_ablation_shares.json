@@ -1,0 +1,14 @@
+{
+    "blank": {
+        "share_image_mean": 0.6026,
+        "share_image_median": 0.5908,
+        "share_text_mean": 0.3974,
+        "interaction_mean_abs": 2.421
+    },
+    "drop": {
+        "share_image_mean": 0.6474,
+        "share_image_median": 0.6827,
+        "share_text_mean": 0.3526,
+        "interaction_mean_abs": 2.0561
+    }
+}

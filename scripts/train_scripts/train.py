@@ -34,7 +34,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    BATCH_SIZE, DATASET, FF_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH,
+    BATCH_SIZE, DATASET, FF_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH, DEVICES
     NAME_IMG_EMBED, NAME_LLM, N_TOKENS, RAND_SEED, TEXT_WEIGHTS_PATH,
 )
 from configuration_files.paths import DATASET_WEIGHTS_DIR
@@ -43,7 +43,7 @@ from models.fusion import HEAD_METADATA, fusion_head_path
 from models.themis_model import get_Themis
 from scripts.utils.utils import load_available_datasets, load_model
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = ROOT / "data"
 
 NEURAL_MODELS = ("text", "image", "feature-fusion")
@@ -135,7 +135,7 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
     """Train a text, image, or feature-fusion Themis checkpoint."""
     image_encoder = args.name_img_embed or NAME_IMG_EMBED
     merge_tokens = args.merge_tokens or None
-    device = torch.device(args.device)
+    device = torch.device(args.devices[0])
 
     print(f"  Image encoder: {image_encoder}")
 
@@ -223,7 +223,7 @@ def require_unimodal_checkpoints(dataset):
 
 def collect_unimodal_scores(args, dataset_class, annotation_loader, data_file, image_dir, split_name="train"):
     """Run both unimodal models on a data split to collect posterior scores."""
-    device = torch.device(args.device)
+    device = torch.device(args.devices[0])
     dataset_classes, load_functions = load_available_datasets()
 
     all_labels, all_text_scores, all_image_scores = None, None, None
@@ -350,7 +350,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--n-tokens", type=int, default=N_TOKENS)
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--devices", nargs="+", default=DEVICES)
     parser.add_argument("--merge-tokens", type=int, default=0)
     parser.add_argument("--lora-alpha", type=int, default=8)
     parser.add_argument("--lora-r", type=int, default=8)
@@ -404,7 +404,7 @@ def main():
 
     print("Training configuration")
     print(f"  Dataset: {args.dataset}")
-    print(f"  Device:  {args.device}")
+    print(f"  Device:  {args.devices[0]}")
 
     if args.train_all:
         for model_name in MODEL_CHOICES:

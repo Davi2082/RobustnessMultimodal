@@ -34,7 +34,7 @@ from configuration_files.configuration import DATASET, DEVICES
 from scripts.utils.devices import resolve_devices
 
 FUSIONS = ["min", "mean", "max", "svm-rbf", "linear", "feature-fusion"]
-ATTACKS = ["pgd", "trepat", "sum", "interleaved", "joint"]
+ATTACKS = ["pgd", "trepat", "sum", "interleaved"] #, "joint"
 LOG_DIR = "logs/multimodal_attacks"
 
 ATTACK_DIRS = {

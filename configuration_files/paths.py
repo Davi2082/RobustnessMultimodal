@@ -8,7 +8,8 @@ PROJECT_ROOT = os.path.dirname(CONFIG_DIR)
 CHECKPOINTS_ROOT = os.path.join(PROJECT_ROOT, "checkpoints")
 DATASET_WEIGHTS_DIR = os.path.join(CHECKPOINTS_ROOT, DATASET)
 # Paths to model weights for the current dataset
-TEXT_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, "clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt")
+TEXT_ENCODER = {"Recovery": "clip-vit-large-patch14", "Fakeddit": "clip-vit-base-patch32"}
+TEXT_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, f"{TEXT_ENCODER[DATASET]}_None_8_8_0.4_True10_best_txt_only.pt")
 IMAGE_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt")
 FF_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
