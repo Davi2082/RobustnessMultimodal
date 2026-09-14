@@ -28,10 +28,10 @@ from configuration_files.configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
-    DEVICES,
     SUBSET_SIZE,
+    dataset_devices,
 )
-from configuration_files.paths import RESULT_PATH, CLEAN_IMAGE_PARAMS, DATA_PERTURBED_IMAGE
+from configuration_files.paths import CLEAN_IMAGE_PARAMS, DATA_PERTURBED_IMAGE, model_perturbed_dir
 from data_loading import my_datasets
 
 # Main evaluation function
@@ -68,12 +68,14 @@ def main():
     parser.add_argument("--pgd_iters", type=int, default=PGD_ITERS)
     parser.add_argument("--epsilon", type=float, default=EPSILON)
     parser.add_argument("--alpha_factor", type=float, default=ALPHA_FACTOR)
-    parser.add_argument("--results_path", type=str, default=RESULT_PATH)
+    parser.add_argument("--results_path", type=str, default=None)
     parser.add_argument("--experiment-name", default="pgd")
+    parser.add_argument("--device", type=str, default=None,
+                        help="GPU device. Defaults to the dataset's configured device.")
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device(DEVICES[0])
+    device = torch.device(args.device or dataset_devices(args.dataset)[0])
 
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)
@@ -82,8 +84,8 @@ def main():
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
 
-    # Results dir setup
-    output_dir = os.path.join(args.results_path, "perturbed", "image", args.experiment_name)
+    # Results dir setup — results/<dataset>/image/perturbed/<attack>/
+    output_dir = model_perturbed_dir("image", args.experiment_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination

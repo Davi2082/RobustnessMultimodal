@@ -33,9 +33,9 @@ from data_loading import my_datasets
 from models.themis_model import get_Themis
 from configuration_files.configuration import (
     NAME_IMG_EMBED,
-    FF_WEIGHTS_PATH,
     SOURCE_LABEL,
     TARGET_LABEL,
+    ff_weights_path,
 )
 from configuration_files.paths import ROC_SETS_DIR, ROC_PLOTS_DIR
 
@@ -236,7 +236,7 @@ def load_model(device, args, correct_model_path=None):
     if args.modality == "feature-fusion" or args.modality == "intermediate-fusion":
         args.name_img_embed = NAME_IMG_EMBED
         if args.model_path is None:
-            args.model_path = FF_WEIGHTS_PATH
+            args.model_path = ff_weights_path(getattr(args, "dataset", None))
 
     if args.merge_tokens == 0:
         args.merge_tokens = None

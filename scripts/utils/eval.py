@@ -21,15 +21,15 @@ from scripts.utils.utils import (
 from configuration_files.configuration import (
     NAME_LLM,
     NAME_IMG_EMBED,
-    TEXT_WEIGHTS_PATH,
-    IMAGE_WEIGHTS_PATH,
+    DATASET,
     BATCH_SIZE,
     N_TOKENS,
     THRESHOLD,
-    DEVICES,
     SUBSET_SIZE,
+    dataset_devices,
+    text_weights_path,
+    image_weights_path,
 )
-from configuration_files.paths import RESULT_PATH
 from scripts.utils.devices import resolve_devices
 
 # Main evaluation function
@@ -53,14 +53,13 @@ def main():
     parser.add_argument("--lora_dropout", type=float, default=0.4)
     parser.add_argument("--use_lora", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--set_params", action=argparse.BooleanOptionalAction, default=False)
-    parser.add_argument("--results_path", type=str, default=None)
-    parser.add_argument("--dataset", type=str, default="Recovery", choices=list(dataset_classes.keys()))
-    parser.add_argument("--devices", nargs="+", default=DEVICES,
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'.")
+    parser.add_argument("--dataset", type=str, default=DATASET, choices=list(dataset_classes.keys()))
+    parser.add_argument("--devices", nargs="+", default=None,
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. Defaults to the dataset's configured devices.")
     args = parser.parse_args()
 
-    if args.results_path is None:
-        args.results_path = f"results/{args.dataset}/classification_results"
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
 
     # "Parameters" will be the dictionary that will be saved in the json file with the evaluation parameters
     parameters = {
@@ -80,11 +79,11 @@ def main():
     if args.modality == "late-fusion":
         args.modality = "text"
         if args.model_path is None:
-            args.model_path = args.text_model_path or TEXT_WEIGHTS_PATH
+            args.model_path = args.text_model_path or text_weights_path(args.dataset)
         txt_model, tokenizer, _ = load_model(device, args)
         parameters["Text Model Path"] = args.model_path
         parameters["Fusion Mode"] = args.late_fusion_mode
-        args.model_path = args.image_model_path or IMAGE_WEIGHTS_PATH
+        args.model_path = args.image_model_path or image_weights_path(args.dataset)
         args.modality = "image"
         img_model, _, processor = load_model(device, args)
         parameters["Image Model Path"] = args.model_path
@@ -95,9 +94,9 @@ def main():
     else:
         if args.model_path is None:
             if args.modality == "text":
-                args.model_path = args.text_model_path or TEXT_WEIGHTS_PATH
+                args.model_path = args.text_model_path or text_weights_path(args.dataset)
             elif args.modality == "image":
-                args.model_path = args.image_model_path or IMAGE_WEIGHTS_PATH
+                args.model_path = args.image_model_path or image_weights_path(args.dataset)
         model, tokenizer, processor = load_model(device, args)
         if device_ids:
             model = torch.nn.DataParallel(model, device_ids=device_ids)
@@ -128,10 +127,12 @@ def main():
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
 
-    # Results dir setup
-    output_dir = os.path.join(args.results_path, "clean", args.modality)
+    # Results dir setup — results/<dataset>/<model_or_fusion>/clean/
+    from configuration_files.paths import model_clean_dir
     if args.modality == "late-fusion":
-        output_dir = os.path.join(output_dir, args.late_fusion_mode)
+        output_dir = model_clean_dir(args.late_fusion_mode, args.dataset)
+    else:
+        output_dir = model_clean_dir(args.modality, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
     
     # Dataset obtaination

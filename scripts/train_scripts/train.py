@@ -34,12 +34,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    BATCH_SIZE, DATASET, FF_WEIGHTS_PATH, IMAGE_WEIGHTS_PATH, DEVICES,
-    NAME_IMG_EMBED, NAME_LLM, N_TOKENS, RAND_SEED, TEXT_WEIGHTS_PATH,
+    BATCH_SIZE, DATASET, NAME_IMG_EMBED, NAME_LLM, N_TOKENS, RAND_SEED,
+    dataset_devices, ff_weights_path, image_weights_path, text_weights_path,
 )
-from configuration_files.paths import DATASET_WEIGHTS_DIR
+from configuration_files.paths import dataset_weights_dir
 from data_loading import my_datasets
-from models.fusion import HEAD_METADATA, fusion_head_path
+from models.fusion import fusion_head_path, head_metadata_path
 from models.themis_model import get_Themis
 from scripts.utils.utils import load_available_datasets, load_model
 
@@ -155,7 +155,7 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    checkpoint = Path(DATASET_WEIGHTS_DIR) / CHECKPOINT_NAMES[args.model]
+    checkpoint = Path(dataset_weights_dir(args.dataset)) / CHECKPOINT_NAMES[args.model]
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     history = {"train_loss": [], "val_loss": [], "val_accuracy": []}
     best_f1 = -1.0
@@ -208,11 +208,12 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
 
 def require_unimodal_checkpoints(dataset):
     """Check text + image checkpoints exist before fitting a fusion head."""
+    text_path, image_path = text_weights_path(dataset), image_weights_path(dataset)
     missing = []
-    if not Path(TEXT_WEIGHTS_PATH).exists():
-        missing.append(f"text: {TEXT_WEIGHTS_PATH}")
-    if not Path(IMAGE_WEIGHTS_PATH).exists():
-        missing.append(f"image: {IMAGE_WEIGHTS_PATH}")
+    if not Path(text_path).exists():
+        missing.append(f"text: {text_path}")
+    if not Path(image_path).exists():
+        missing.append(f"image: {image_path}")
     if missing:
         raise FileNotFoundError(
             "Unimodal checkpoints required to fit fusion heads:\n  "
@@ -228,7 +229,7 @@ def collect_unimodal_scores(args, dataset_class, annotation_loader, data_file, i
 
     all_labels, all_text_scores, all_image_scores = None, None, None
 
-    unimodal_paths = {"text": TEXT_WEIGHTS_PATH, "image": IMAGE_WEIGHTS_PATH}
+    unimodal_paths = {"text": text_weights_path(args.dataset), "image": image_weights_path(args.dataset)}
     for modality in ("text", "image"):
         encoder = "openai/" + os.path.basename(unimodal_paths[modality]).split("_")[0]
         ns = argparse.Namespace(
@@ -297,7 +298,7 @@ def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_di
             pipe, {"lr__C": CS}, scoring="roc_auc", cv=folds, n_jobs=-1,
         ).fit(features, labels)
 
-    path = fusion_head_path(args.model)
+    path = fusion_head_path(args.model, args.dataset)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     joblib.dump(head.best_estimator_, path)
     print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
@@ -315,19 +316,20 @@ def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_di
         },
     }
 
+    metadata_path = head_metadata_path(args.dataset)
     existing = {}
-    if os.path.exists(HEAD_METADATA):
-        with open(HEAD_METADATA, encoding="utf-8") as f:
+    if os.path.exists(metadata_path):
+        with open(metadata_path, encoding="utf-8") as f:
             existing = json.load(f)
     existing.update(metadata)
     if "heads" in existing:
         existing["heads"].update(metadata["heads"])
 
-    os.makedirs(os.path.dirname(HEAD_METADATA), exist_ok=True)
-    with open(HEAD_METADATA, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+    with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(existing, indent=4, fp=f)
         f.write("\n")
-    print(f"wrote {HEAD_METADATA}")
+    print(f"wrote {metadata_path}")
     print(f"Fitted {args.model} head. Checkpoint: {path}")
 
 
@@ -350,7 +352,8 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--n-tokens", type=int, default=N_TOKENS)
-    parser.add_argument("--devices", nargs="+", default=DEVICES)
+    parser.add_argument("--devices", nargs="+", default=None,
+                        help="GPU device(s). Defaults to the dataset's configured devices.")
     parser.add_argument("--merge-tokens", type=int, default=0)
     parser.add_argument("--lora-alpha", type=int, default=8)
     parser.add_argument("--lora-r", type=int, default=8)
@@ -358,27 +361,31 @@ def parse_args():
     parser.add_argument("--use-lora", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=RAND_SEED)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
+    return args
 
 
-DEPLOYED_PATHS = {
-    "text": TEXT_WEIGHTS_PATH,
-    "image": IMAGE_WEIGHTS_PATH,
-    "feature-fusion": FF_WEIGHTS_PATH,
-    "svm-rbf": fusion_head_path("svm-rbf"),
-    "linear": fusion_head_path("linear"),
-}
+def deployed_paths(dataset):
+    return {
+        "text": text_weights_path(dataset),
+        "image": image_weights_path(dataset),
+        "feature-fusion": ff_weights_path(dataset),
+        "svm-rbf": fusion_head_path("svm-rbf", dataset),
+        "linear": fusion_head_path("linear", dataset),
+    }
 
 
-def checkpoint_exists(model_name):
+def checkpoint_exists(model_name, dataset):
     """Check if the deployed checkpoint for a model already exists."""
-    return Path(DEPLOYED_PATHS[model_name]).exists()
+    return Path(deployed_paths(dataset)[model_name]).exists()
 
 
 def train_one(args, model_name, dataset_class, annotation_loader, train_file, val_file, image_dir):
     """Train or fit a single model, skipping if checkpoint exists."""
-    if not args.force and checkpoint_exists(model_name):
-        print(f"  [SKIP] {model_name} — checkpoint exists: {DEPLOYED_PATHS[model_name]}")
+    if not args.force and checkpoint_exists(model_name, args.dataset):
+        print(f"  [SKIP] {model_name} — checkpoint exists: {deployed_paths(args.dataset)[model_name]}")
         return
 
     args.model = model_name

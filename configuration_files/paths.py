@@ -1,117 +1,104 @@
 import os
 from configuration_files.configuration import DATASET
 
-# Paths for model weights and results, grouped per dataset
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CONFIG_DIR)
-# Model weights root, grouped per dataset
 CHECKPOINTS_ROOT = os.path.join(PROJECT_ROOT, "checkpoints")
-DATASET_WEIGHTS_DIR = os.path.join(CHECKPOINTS_ROOT, DATASET)
-# Paths to model weights for the current dataset
-TEXT_ENCODER = {"Recovery": "clip-vit-large-patch14", "Fakeddit": "clip-vit-base-patch32"}
-TEXT_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, f"{TEXT_ENCODER[DATASET]}_None_8_8_0.4_True10_best_txt_only.pt")
-IMAGE_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, "clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt")
-FF_WEIGHTS_PATH = os.path.join(DATASET_WEIGHTS_DIR, "clip-vit-base-patch32_None_8_8_0.4_True10_best.pt")
 
-# Results root
-RESULT_PATH = f"results/{DATASET}/classification_results"
-CLEAN_BASE  = os.path.join(RESULT_PATH, "clean")
-PERT_BASE   = os.path.join(RESULT_PATH, "perturbed")
 
-# Clean training-set predictions used to fit late-fusion classifiers
-TRAIN_BASE = f"results/{DATASET}/train"
+def dataset_weights_dir(dataset=None):
+    return os.path.join(CHECKPOINTS_ROOT, dataset or DATASET)
+
+
+# ---------------------------------------------------------------------------
+# New result layout:
+#   results/<dataset>/<model_or_fusion>/clean/
+#   results/<dataset>/<model_or_fusion>/perturbed/<attack>/
+#   results/<dataset>/<model_or_fusion>/feature_ablation/
+# ---------------------------------------------------------------------------
+
+def dataset_result_root(dataset=None):
+    """Top-level results directory for a dataset."""
+    return f"results/{dataset or DATASET}"
+
+
+def model_clean_dir(model_or_fusion, dataset=None):
+    """results/<dataset>/<model_or_fusion>/clean/"""
+    return os.path.join(dataset_result_root(dataset), model_or_fusion, "clean")
+
+
+def model_perturbed_dir(model_or_fusion, attack, dataset=None):
+    """results/<dataset>/<model_or_fusion>/perturbed/<attack>/"""
+    return os.path.join(dataset_result_root(dataset), model_or_fusion, "perturbed", attack)
+
+
+def model_ablation_dir(model_or_fusion, dataset=None):
+    """results/<dataset>/<model_or_fusion>/feature_ablation/"""
+    return os.path.join(dataset_result_root(dataset), model_or_fusion, "feature_ablation")
+
+
+def clean_text_params(dataset=None):
+    return os.path.join(model_clean_dir("text", dataset), "parameters.json")
+
+
+def clean_image_params(dataset=None):
+    return os.path.join(model_clean_dir("image", dataset), "parameters.json")
+
+
+def clean_ff_params(dataset=None):
+    return os.path.join(model_clean_dir("feature-fusion", dataset), "parameters.json")
+
+
+def dataset_train_base(dataset=None):
+    return f"results/{dataset or DATASET}/train"
+
+
+def train_svm_model(dataset=None):
+    return os.path.join(dataset_train_base(dataset), "svm_rbf.joblib")
+
+
+# Convenience constants for the active DATASET
+DATASET_WEIGHTS_DIR = dataset_weights_dir()
+RESULT_PATH = dataset_result_root()  # backward compat for plot scripts
+CLEAN_TEXT_PARAMS = clean_text_params()
+CLEAN_IMAGE_PARAMS = clean_image_params()
+CLEAN_FF_PARAMS = clean_ff_params()
+
+# Training data
+TRAIN_BASE = dataset_train_base()
 TRAIN_TEXT_CSV = os.path.join(TRAIN_BASE, "text", "results.csv")
 TRAIN_IMAGE_CSV = os.path.join(TRAIN_BASE, "image", "results.csv")
-TRAIN_SVM_MODEL = os.path.join(TRAIN_BASE, "svm_rbf.joblib")
-
-# Dataset training data
+TRAIN_SVM_MODEL = train_svm_model()
 TRAIN_DATA_CSV = f"data/{DATASET}/train_augmented.csv"
 TRAIN_IMAGES_DIR = f"data/{DATASET}/images"
 
-# Clean - CSVs
-CLEAN_TEXT_CSV  = os.path.join(CLEAN_BASE, "text",  "results.csv")
-CLEAN_IMAGE_CSV = os.path.join(CLEAN_BASE, "image", "results.csv")
+# Perturbed sample dumps (generated images + texts), grouped per dataset
+def dataset_perturbed_base(dataset=None):
+    return os.path.join("data_perturbed", dataset or DATASET)
 
-# Clean - parameters.json
-CLEAN_TEXT_PARAMS  = os.path.join(CLEAN_BASE, "text",           "parameters.json")
-CLEAN_IMAGE_PARAMS = os.path.join(CLEAN_BASE, "image",          "parameters.json")
-CLEAN_FF_PARAMS    = os.path.join(CLEAN_BASE, "feature-fusion", "parameters.json")
 
-# Perturbed - output directories
-LATE_FUSION_RESULTS_DIR = os.path.join(PERT_BASE, "late-fusion")
-PERT_IMAGE_DIR = os.path.join(PERT_BASE, "image")
-PERT_TEXT_DIR  = os.path.join(PERT_BASE, "text")
-PERT_FF_DIR    = os.path.join(PERT_BASE, "feature-fusion")
+def late_fusion_data_dir(dataset=None):
+    return os.path.join(dataset_perturbed_base(dataset), "late-fusion")
 
-# Perturbed - CSVs
-PER_TEXT_CSV  = os.path.join(PERT_TEXT_DIR,  "perturbed_results.csv")
-PER_IMAGE_CSV = os.path.join(PERT_IMAGE_DIR, "perturbed_results.csv")
 
-# Perturbed - parameters.json
-PER_TEXT_PARAMS  = os.path.join(PERT_TEXT_DIR,  "parameters.json")
-PER_IMAGE_PARAMS = os.path.join(PERT_IMAGE_DIR, "parameters.json")
-
-# Perturbed sample dumps - generated images + texts
-DATA_PERTURBED_BASE  = "data_perturbed"
+DATA_PERTURBED_BASE = dataset_perturbed_base()
 DATA_PERTURBED_IMAGE = os.path.join(DATA_PERTURBED_BASE, "image")
-DATA_PERTURBED_TEXT  = os.path.join(DATA_PERTURBED_BASE, "text")
-LATE_FUSION_DATA_DIR = os.path.join(DATA_PERTURBED_BASE, "late-fusion")
-DATA_PERTURBED_FF    = os.path.join(DATA_PERTURBED_BASE, "feature-fusion")
+DATA_PERTURBED_TEXT = os.path.join(DATA_PERTURBED_BASE, "text")
+LATE_FUSION_DATA_DIR = late_fusion_data_dir()
+DATA_PERTURBED_FF = os.path.join(DATA_PERTURBED_BASE, "feature-fusion")
 
-# ROC directories
-ROC_BASE     = "figures/classification_results/rocs"
-ROC_SETS_DIR  = os.path.join(ROC_BASE, "roc_sets")
+# ROC / figures
+ROC_BASE = "figures/classification_results/rocs"
+ROC_SETS_DIR = os.path.join(ROC_BASE, "roc_sets")
 ROC_PLOTS_DIR = os.path.join(ROC_BASE, "roc_plots")
-
-# Late-fusion pipeline artifacts
 LATE_FUSION_FIGURES_DIR = "figures/classification_results/scatter"
 LATE_FUSION_LOG_DIR = "logs/late_fusion_attacks"
 
-LATE_FUSION_SCENARIO_FILES = {
-    "text": os.path.join("text-perturbed", "perturbed_results.csv"),
-    "image": os.path.join("image-perturbed", "perturbed_results.csv"),
-    "both": "perturbed_results.csv",
-}
-
-
-def late_fusion_directory_name(fusion):
-    """Return the canonical directory/CLI spelling for a fusion method."""
-    return str(fusion).replace("_", "-")
-
-
-def late_fusion_scenario_path(fusion_dir, attack_scope):
-    """Return one scenario CSV below an already resolved fusion directory."""
-    try:
-        relative_path = LATE_FUSION_SCENARIO_FILES[attack_scope]
-    except KeyError as error:
-        valid = ", ".join(LATE_FUSION_SCENARIO_FILES)
-        raise ValueError(
-            f"Unknown late-fusion attack scope {attack_scope!r}; "
-            f"expected one of: {valid}"
-        ) from error
-    return os.path.join(os.fspath(fusion_dir), relative_path)
-
-
-def late_fusion_result_path(
-    fusion,
-    attack_scope,
-    base_dir=LATE_FUSION_RESULTS_DIR,
-):
-    """Return the canonical CSV path for a fusion/scenario pair."""
-    fusion_dir = os.path.join(
-        os.fspath(base_dir),
-        late_fusion_directory_name(fusion),
-    )
-    return late_fusion_scenario_path(fusion_dir, attack_scope)
-
-
-# Annotations and images are split across two roots on this branch; resolve
-# either so no driver has to guess which one holds a given dataset.
+# Dataset annotations / images
 DATASET_ROOTS = ("data",)
 
 
 def dataset_images_dir(dataset):
-    """Image directory of a dataset, whichever root holds it."""
     for root in DATASET_ROOTS:
         candidate = os.path.join(root, dataset, "images")
         if os.path.isdir(candidate):
@@ -122,9 +109,7 @@ def dataset_images_dir(dataset):
 
 
 def dataset_annotations(dataset, split="test"):
-    """Annotation file of one split, whichever root holds it."""
     import glob as _glob
-
     for root in DATASET_ROOTS:
         matches = sorted(_glob.glob(os.path.join(root, dataset, f"{split}.*")))
         if matches:

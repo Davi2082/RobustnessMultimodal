@@ -41,8 +41,10 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 
 from data_loading import my_datasets
 from scripts.utils.utils import load_available_datasets, load_model
-from configuration_files.configuration import NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DEVICES, SUBSET_SIZE
-from configuration_files.paths import RESULT_PATH, dataset_annotations, dataset_images_dir
+from configuration_files.configuration import (
+    NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DATASET, SUBSET_SIZE, dataset_devices,
+)
+from configuration_files.paths import dataset_annotations, dataset_images_dir
 from scripts.utils.devices import resolve_devices
 
 
@@ -120,12 +122,18 @@ def main():
     parser.add_argument("--lora_dropout", type=float)
     parser.add_argument("--use_lora", type=bool)
     parser.add_argument("--set_params", type=bool, default=True)
-    parser.add_argument("--results_path", type=str, default=RESULT_PATH)
-    parser.add_argument("--dataset", type=str, default="Recovery", choices=list(dataset_classes.keys()))
-    parser.add_argument("--devices", nargs="+", default=DEVICES,
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'.")
+    parser.add_argument("--results_path", type=str, default=None)
+    parser.add_argument("--dataset", type=str, default=DATASET, choices=list(dataset_classes.keys()))
+    parser.add_argument("--devices", nargs="+", default=None,
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. "
+                             "Defaults to the dataset's configured devices.")
     args = parser.parse_args()
 
+    if args.results_path is None:
+        from configuration_files.paths import dataset_result_root
+        args.results_path = dataset_result_root(args.dataset)
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
     args.devices = resolve_devices(args.devices)
     device = torch.device(args.devices[0])
     # load_model forces the feature-fusion encoder/checkpoint for this modality
@@ -175,7 +183,8 @@ def main():
         out[col] = torch.cat(chunks).numpy()
     df = pd.DataFrame(out)
 
-    output_dir = os.path.join(args.results_path, "ablation", args.modality)
+    from configuration_files.paths import model_ablation_dir
+    output_dir = model_ablation_dir(args.modality, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
     stem = "modality_ablation"
     csv_path = os.path.join(output_dir, f"{stem}.csv")

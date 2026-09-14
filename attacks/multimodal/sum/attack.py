@@ -96,25 +96,27 @@ def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
         "max_variants": max(1, MAX_VARIANTS // divisor),
         "divisor": divisor,
     }
+
+
 from configuration_files.paths import (
     dataset_annotations,
     dataset_images_dir,
     CLEAN_IMAGE_PARAMS,
     CLEAN_TEXT_PARAMS,
-    LATE_FUSION_DATA_DIR,
-    RESULT_PATH,
     TRAIN_SVM_MODEL,
-    late_fusion_scenario_path,
+    late_fusion_data_dir,
+    model_perturbed_dir,
 )
+
+SCENARIO_FILES = {
+    "text": os.path.join("text-perturbed", "perturbed_results.csv"),
+    "image": os.path.join("image-perturbed", "perturbed_results.csv"),
+    "both": "perturbed_results.csv",
+}
 from attacks.attack_algorithms.text.TREPAT.modifier import Modifier
 from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
-from attacks.attack_algorithms.img.PGD.pgd import (
-    img_perturbation,
-    project_to_epsilon_ball,
-)
-from attacks.attack_algorithms.text.BERTATTACK.attack import (
-    bertattack as bertattack_attack,
-)
+from attacks.attack_algorithms.img.PGD.pgd import img_perturbation, project_to_epsilon_ball
+from attacks.attack_algorithms.text.BERTATTACK.attack import bertattack as bertattack_attack
 from attacks.attack_algorithms.text.TREPAT.attack import TargetedTrepatAttacker
 from attacks.attack_algorithms.text.common import model_sbert, visible_text_window
 from models.fusion import (
@@ -138,24 +140,11 @@ from scripts.utils.utils import (
     save_predictions,
 )
 
-
-
-COMPONENT_OUTPUT_NAMES = (
-    "text_scores",
-    "text_logits",
-    "image_scores",
-    "image_logits",
-)
+COMPONENT_OUTPUT_NAMES = ("text_scores", "text_logits", "image_scores", "image_logits")
 COMPONENT_OUTPUT_COLUMNS = tuple(name[:-1] for name in COMPONENT_OUTPUT_NAMES)
 
 
-
-
-def parse_args() -> tuple[
-    argparse.Namespace,
-    dict[str, Any],
-    dict[str, Any],
-]:
+def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     """Parse arguments, using the two clean parameter files as defaults."""
     parameter_parser = argparse.ArgumentParser(add_help=False)
     parameter_parser.add_argument(
@@ -174,14 +163,8 @@ def parse_args() -> tuple[
     )
     parameter_args, _ = parameter_parser.parse_known_args()
 
-    text_parameters = read_parameters(
-        parameter_args.text_parameters,
-        "Text model",
-    )
-    image_parameters = read_parameters(
-        parameter_args.image_parameters,
-        "Image model",
-    )
+    text_parameters = read_parameters(parameter_args.text_parameters, "Text model")
+    image_parameters = read_parameters(parameter_args.image_parameters, "Image model")
 
     parser = argparse.ArgumentParser(
         parents=[parameter_parser],
@@ -192,11 +175,7 @@ def parse_args() -> tuple[
     )
 
     model_group = parser.add_argument_group("late-fusion classifier")
-    model_group.add_argument(
-        "--fusion",
-        choices=FUSION_CHOICES + ("svm_rbf",),
-        default="mean",
-    )
+    model_group.add_argument("--fusion", choices=FUSION_CHOICES + ("svm_rbf",), default="mean")
     model_group.add_argument(
         "--text-model-path",
         "--text_model_path",
@@ -234,20 +213,14 @@ def parse_args() -> tuple[
     )
 
     data_group = parser.add_argument_group("data and output")
-    data_group.add_argument(
-        "--dataset",
-        default=text_parameters["Dataset"],
-    )
+    data_group.add_argument("--dataset", default=text_parameters["Dataset"])
     data_group.add_argument(
         "--test-data",
         "--test_data",
         dest="test_data",
         type=Path,
         default=None,
-        help=(
-            "Test annotation file. "
-            "By default data/<dataset>/test.* is used."
-        ),
+        help=("Test annotation file. " "By default data/<dataset>/test.* is used."),
     )
     data_group.add_argument(
         "--images-dir",
@@ -255,10 +228,7 @@ def parse_args() -> tuple[
         dest="images_dir",
         type=Path,
         default=None,
-        help=(
-            "Image directory. "
-            "By default data/<dataset>/images is used."
-        ),
+        help=("Image directory. " "By default data/<dataset>/images is used."),
     )
     data_group.add_argument(
         "--batch-size",
@@ -275,25 +245,10 @@ def parse_args() -> tuple[
         default=int(text_parameters["Number of Tokens"]),
     )
     data_group.add_argument(
-        "--subset-size",
-        "--subset_size",
-        dest="subset_size",
-        type=int,
-        default=SUBSET_SIZE,
+        "--subset-size", "--subset_size", dest="subset_size", type=int, default=SUBSET_SIZE
     )
     data_group.add_argument(
-        "--num-workers",
-        "--num_workers",
-        dest="num_workers",
-        type=int,
-        default=0,
-    )
-    data_group.add_argument(
-        "--results-path",
-        "--results_path",
-        dest="results_path",
-        type=Path,
-        default=Path(RESULT_PATH),
+        "--num-workers", "--num_workers", dest="num_workers", type=int, default=0
     )
     data_group.add_argument(
         "--output-dir",
@@ -301,10 +256,7 @@ def parse_args() -> tuple[
         dest="output_dir",
         type=Path,
         default=None,
-        help=(
-            "Output base. By default: "
-            "<results-path>/perturbed/late-fusion/<fusion>."
-        ),
+        help="Output directory for results. Default: results/<dataset>/<fusion>/perturbed/sum/",
     )
     data_group.add_argument(
         "--dump-dir",
@@ -395,22 +347,11 @@ def parse_args() -> tuple[
             "budget for text-only and half for both."
         ),
     )
+    attack_group.add_argument("--epsilon", type=float, default=EPSILON)
     attack_group.add_argument(
-        "--epsilon",
-        type=float,
-        default=EPSILON,
+        "--alpha-factor", dest="alpha_factor", type=float, default=ALPHA_FACTOR
     )
-    attack_group.add_argument(
-        "--alpha-factor",
-        dest="alpha_factor",
-        type=float,
-        default=ALPHA_FACTOR,
-    )
-    attack_group.add_argument(
-        "--k",
-        type=int,
-        default=K_BERT_ATTACK,
-    )
+    attack_group.add_argument("--k", type=int, default=K_BERT_ATTACK)
     attack_group.add_argument(
         "--threshold-pred-score",
         dest="threshold_pred_score",
@@ -418,10 +359,7 @@ def parse_args() -> tuple[
         default=THRESHOLD_PRED_SCORE,
     )
     attack_group.add_argument(
-        "--max-words-to-attack",
-        dest="max_words_to_attack",
-        type=int,
-        default=MAX_WORDS_TO_ATTACK,
+        "--max-words-to-attack", dest="max_words_to_attack", type=int, default=MAX_WORDS_TO_ATTACK
     )
     attack_group.add_argument(
         "--max-candidates-per-word",
@@ -436,18 +374,20 @@ def parse_args() -> tuple[
         default=MAX_WORDS_FOR_IMPORTANCE,
     )
     attack_group.add_argument(
-        "--min-txt-similarity",
-        dest="min_txt_similarity",
-        type=float,
-        default=MIN_TXT_SIMILARITY,
+        "--min-txt-similarity", dest="min_txt_similarity", type=float, default=MIN_TXT_SIMILARITY
     )
 
     device_group = parser.add_argument_group("devices")
-    device_group.add_argument("--device", default=DEVICES[0],
-                              help="Main classifier device (default: from config).")
-    device_group.add_argument("--device-mlm", "--device_mlm",
-                              dest="device_mlm", default=DEVICE_MLM,
-                              help="MLM / rephraser device (default: from config).")
+    device_group.add_argument(
+        "--device", default=DEVICES[0], help="Main classifier device (default: from config)."
+    )
+    device_group.add_argument(
+        "--device-mlm",
+        "--device_mlm",
+        dest="device_mlm",
+        default=DEVICE_MLM,
+        help="MLM / rephraser device (default: from config).",
+    )
 
     args = parser.parse_args()
 
@@ -462,102 +402,62 @@ def parse_args() -> tuple[
 
     # Interleaving changes the order in which the budget is spent, never its
     # size: one unit of each channel per step until both budgets are exhausted.
-    args.total_steps = (
-        1
-        if args.optimization == "sum"
-        else max(args.pgd_iters, args.max_variants)
-    )
+    args.total_steps = 1 if args.optimization == "sum" else max(args.pgd_iters, args.max_variants)
 
     return args, text_parameters, image_parameters
 
 
 def validate_args(
-    args: argparse.Namespace,
-    text_parameters: dict[str, Any],
-    image_parameters: dict[str, Any],
+    args: argparse.Namespace, text_parameters: dict[str, Any], image_parameters: dict[str, Any]
 ) -> None:
     """Validate experiment inputs before loading large models."""
     if args.source_label == args.target_label:
-        raise ValueError(
-            "Source and target labels must be different"
-        )
+        raise ValueError("Source and target labels must be different")
 
     if args.target_label != 1 - args.source_label:
-        raise ValueError(
-            "This binary attack requires "
-            "target_label == 1 - source_label"
-        )
+        raise ValueError("This binary attack requires " "target_label == 1 - source_label")
 
     if not 0.0 < args.threshold < 1.0:
-        raise ValueError(
-            "--threshold must be strictly between 0 and 1"
-        )
+        raise ValueError("--threshold must be strictly between 0 and 1")
 
     if args.batch_size <= 0:
-        raise ValueError(
-            "--batch-size must be positive"
-        )
+        raise ValueError("--batch-size must be positive")
 
     if args.n_tokens <= 0:
-        raise ValueError(
-            "--n-tokens must be positive"
-        )
+        raise ValueError("--n-tokens must be positive")
 
-    if (
-        args.subset_size is not None
-        and args.subset_size <= 0
-    ):
-        raise ValueError(
-            "--subset-size must be positive"
-        )
+    if args.subset_size is not None and args.subset_size <= 0:
+        raise ValueError("--subset-size must be positive")
 
     if args.num_workers < 0:
-        raise ValueError(
-            "--num-workers cannot be negative"
-        )
+        raise ValueError("--num-workers cannot be negative")
 
     if args.pgd_iters <= 0:
-        raise ValueError(
-            "--pgd-iters must be positive"
-        )
+        raise ValueError("--pgd-iters must be positive")
 
     if args.max_variants <= 0:
-        raise ValueError(
-            "--max-variants must be positive"
-        )
+        raise ValueError("--max-variants must be positive")
 
     if args.epsilon < 0:
-        raise ValueError(
-            "--epsilon cannot be negative"
-        )
+        raise ValueError("--epsilon cannot be negative")
 
     if args.alpha_factor <= 0:
-        raise ValueError(
-            "--alpha-factor must be positive"
-        )
+        raise ValueError("--alpha-factor must be positive")
 
     if not 0.0 <= args.min_txt_similarity <= 1.0:
-        raise ValueError(
-            "--min-txt-similarity must be between 0 and 1"
-        )
+        raise ValueError("--min-txt-similarity must be between 0 and 1")
 
     if not args.text_model_path.is_file():
-        raise FileNotFoundError(
-            f"Text-model weights do not exist: "
-            f"{args.text_model_path}"
-        )
+        raise FileNotFoundError(f"Text-model weights do not exist: " f"{args.text_model_path}")
 
     if not args.image_model_path.is_file():
-        raise FileNotFoundError(
-            f"Image-model weights do not exist: "
-            f"{args.image_model_path}"
-        )
+        raise FileNotFoundError(f"Image-model weights do not exist: " f"{args.image_model_path}")
 
     # Learned rules are attacked through the head persisted by
     # scripts/fit_fusion_heads.py, so clean and adversarial rows describe the
     # same classifier.
     if args.fusion in LEARNED_RULES:
-        head = fusion_head_path(args.fusion)
+        head = fusion_head_path(args.fusion, args.dataset)
         if not os.path.exists(head):
             raise FileNotFoundError(
                 f"No fitted {args.fusion} head at {head}. "
@@ -581,12 +481,6 @@ def validate_args(
         )
 
 
-
-
-
-
-
-
 class LateFusionTrepatVictim:
     """TRePAT victim whose probabilities come from the fused classifier."""
 
@@ -604,32 +498,18 @@ class LateFusionTrepatVictim:
         self.processor = processor
         self.args = args
         self.device = device
-        self._prob_cache: dict[
-            str,
-            np.ndarray,
-        ] = {}
+        self._prob_cache: dict[str, np.ndarray] = {}
 
-        processed = processor(
-            images=image,
-            return_tensors="pt",
-        ).to(device)
+        processed = processor(images=image, return_tensors="pt").to(device)
 
-        pixel_values = processed[
-            "pixel_values"
-        ]
+        pixel_values = processed["pixel_values"]
 
         if pixel_values.ndim == 4:
             pixel_values = pixel_values.unsqueeze(1)
 
         self.image = pixel_values
 
-    def _build_text_input(
-        self,
-        texts: list[str],
-    ) -> dict[
-        str,
-        torch.Tensor,
-    ]:
+    def _build_text_input(self, texts: list[str]) -> dict[str, torch.Tensor]:
         tokenized = self.tokenizer(
             texts,
             return_tensors="pt",
@@ -639,118 +519,46 @@ class LateFusionTrepatVictim:
             max_length=self.args.n_tokens,
         ).to(self.device)
 
-        return {
-            "input_ids": tokenized.input_ids.unsqueeze(1)
-        }
+        return {"input_ids": tokenized.input_ids.unsqueeze(1)}
 
-    def _build_image_input(
-        self,
-        batch_size: int,
-    ) -> dict[
-        str,
-        torch.Tensor,
-    ]:
+    def _build_image_input(self, batch_size: int) -> dict[str, torch.Tensor]:
         image = self.image
 
-        if (
-            image.shape[0] == 1
-            and batch_size > 1
-        ):
-            repeats = [
-                batch_size
-            ] + [
-                1
-            ] * (
-                image.ndim - 1
-            )
-            image = image.repeat(
-                *repeats
-            )
+        if image.shape[0] == 1 and batch_size > 1:
+            repeats = [batch_size] + [1] * (image.ndim - 1)
+            image = image.repeat(*repeats)
 
         elif image.shape[0] != batch_size:
             raise ValueError(
-                f"Fixed-image batch={image.shape[0]} does not "
-                f"match text batch={batch_size}"
+                f"Fixed-image batch={image.shape[0]} does not " f"match text batch={batch_size}"
             )
 
-        return {
-            "pixel_values": image
-        }
+        return {"pixel_values": image}
 
-    def _scores_from_texts(
-        self,
-        texts: list[str],
-    ) -> np.ndarray:
-        text_input = self._build_text_input(
-            texts
-        )
-        image_input = self._build_image_input(
-            len(texts)
-        )
+    def _scores_from_texts(self, texts: list[str]) -> np.ndarray:
+        text_input = self._build_text_input(texts)
+        image_input = self._build_image_input(len(texts))
 
         with torch.inference_mode():
-            scores, _ = self.model(
-                image_input,
-                text_input,
-            )
+            scores, _ = self.model(image_input, text_input)
 
-        return (
-            scores
-            .detach()
-            .cpu()
-            .numpy()
-            .reshape(-1)
-        )
+        return scores.detach().cpu().numpy().reshape(-1)
 
-    def get_prob(
-        self,
-        inputs: list[str],
-    ) -> np.ndarray:
-        missing = list(
-            dict.fromkeys(
-                text
-                for text in inputs
-                if text not in self._prob_cache
-            )
-        )
+    def get_prob(self, inputs: list[str]) -> np.ndarray:
+        missing = list(dict.fromkeys(text for text in inputs if text not in self._prob_cache))
 
         if missing:
-            scores = self._scores_from_texts(
-                missing
-            )
+            scores = self._scores_from_texts(missing)
 
-            for text, score in zip(
-                missing,
-                scores,
-            ):
-                self._prob_cache[text] = np.asarray(
-                    [
-                        1.0 - score,
-                        score,
-                    ],
-                    dtype=np.float32,
-                )
+            for text, score in zip(missing, scores):
+                self._prob_cache[text] = np.asarray([1.0 - score, score], dtype=np.float32)
 
-        return np.stack(
-            [
-                self._prob_cache[text]
-                for text in inputs
-            ],
-            axis=0,
-        )
+        return np.stack([self._prob_cache[text] for text in inputs], axis=0)
 
-    def get_pred(
-        self,
-        inputs: list[str],
-    ) -> np.ndarray:
-        probabilities = self.get_prob(
-            inputs
-        )
+    def get_pred(self, inputs: list[str]) -> np.ndarray:
+        probabilities = self.get_prob(inputs)
 
-        return (
-            probabilities[:, 1]
-            > self.args.threshold
-        ).astype(np.int64)
+        return (probabilities[:, 1] > self.args.threshold).astype(np.int64)
 
 
 def fusion_trepat_attack(
@@ -764,10 +572,7 @@ def fusion_trepat_attack(
     source_label: int | None = None,
     target_label: int | None = None,
     max_variants: int | None = None,
-) -> tuple[
-    dict[str, Any],
-    float,
-]:
+) -> tuple[dict[str, Any], float]:
     """Attack text candidates using the fused probability as feedback.
 
     ``source_label``/``target_label`` override the configured pair so an
@@ -777,11 +582,7 @@ def fusion_trepat_attack(
         source_label = args.source_label
     if target_label is None:
         target_label = args.target_label
-    visible_text, hidden_text = visible_text_window(
-        news["txt"],
-        tokenizer,
-        args.n_tokens,
-    )
+    visible_text, hidden_text = visible_text_window(news["txt"], tokenizer, args.n_tokens)
 
     victim = LateFusionTrepatVictim(
         model=model,
@@ -799,50 +600,25 @@ def fusion_trepat_attack(
         max_variants=(args.max_variants if max_variants is None else max_variants),
     )
 
-    attacker = TargetedTrepatAttacker(
-        modifier,
-        source_label,
-        target_label,
-    )
+    attacker = TargetedTrepatAttacker(modifier, source_label, target_label)
 
-    perturbed_visible = attacker.attack(
-        victim,
-        visible_text,
-    )
+    perturbed_visible = attacker.attack(victim, visible_text)
 
     if perturbed_visible is None:
         perturbed_visible = visible_text
 
-    perturbed_text = (
-        perturbed_visible
-        + hidden_text
-    )
+    perturbed_text = perturbed_visible + hidden_text
 
     with torch.inference_mode():
-        original_embedding = model_sbert.encode(
-            news["txt"],
-            convert_to_tensor=True,
-            device="cpu",
-        )
+        original_embedding = model_sbert.encode(news["txt"], convert_to_tensor=True, device="cpu")
 
         perturbed_embedding = model_sbert.encode(
-            perturbed_text,
-            convert_to_tensor=True,
-            device="cpu",
+            perturbed_text, convert_to_tensor=True, device="cpu"
         )
 
-        similarity = util.cos_sim(
-            original_embedding,
-            perturbed_embedding,
-        ).item()
+        similarity = util.cos_sim(original_embedding, perturbed_embedding).item()
 
-    return (
-        {
-            "txt": perturbed_text,
-            "img": news["img"],
-        },
-        similarity,
-    )
+    return ({"txt": perturbed_text, "img": news["img"]}, similarity)
 
 
 class TrepatStepState:
@@ -866,16 +642,19 @@ class TrepatStepState:
     ):
         self.hidden_text: str
         self.visible_text, self.hidden_text = visible_text_window(
-            news["txt"], tokenizer, args.n_tokens,
+            news["txt"], tokenizer, args.n_tokens
         )
         self.original_text = news["txt"]
         self.victim = LateFusionTrepatVictim(
-            model=model, tokenizer=tokenizer, processor=processor,
-            args=args, device=device, image=news["img"],
+            model=model,
+            tokenizer=tokenizer,
+            processor=processor,
+            args=args,
+            device=device,
+            image=news["img"],
         )
         self.modifier = Modifier(
-            rephraser, splitter="cascade", weak=False,
-            max_variants=args.max_variants,
+            rephraser, splitter="cascade", weak=False, max_variants=args.max_variants
         )
         self.source_label = source_label
         self.target_label = target_label
@@ -890,9 +669,7 @@ class TrepatStepState:
         current adversarial image from the PGD channel.
         """
         # Update victim image for this round.
-        processed = self.victim.processor(
-            images=image, return_tensors="pt",
-        ).to(self.victim.device)
+        processed = self.victim.processor(images=image, return_tensors="pt").to(self.victim.device)
         pixel_values = processed["pixel_values"]
         if pixel_values.ndim == 4:
             pixel_values = pixel_values.unsqueeze(1)
@@ -903,9 +680,7 @@ class TrepatStepState:
             pred = self.victim.get_pred([self.visible_text])[0]
             if pred != self.source_label:
                 return {"txt": self.original_text, "img": image}, 1.0
-            self.best_target_prob = self.victim.get_prob(
-                [self.visible_text]
-            )[0, self.target_label]
+            self.best_target_prob = self.victim.get_prob([self.visible_text])[0, self.target_label]
             self.modifier.init(self.visible_text)
             self._initialized = True
 
@@ -928,49 +703,30 @@ class TrepatStepState:
 
         return self._finalize(image)
 
-    def _finalize(
-        self, image: Image.Image,
-    ) -> tuple[dict[str, Any], float]:
+    def _finalize(self, image: Image.Image) -> tuple[dict[str, Any], float]:
         with torch.inference_mode():
             original_emb = model_sbert.encode(
-                self.original_text, convert_to_tensor=True, device="cpu",
+                self.original_text, convert_to_tensor=True, device="cpu"
             )
-            perturbed_emb = model_sbert.encode(
-                self.best_text, convert_to_tensor=True, device="cpu",
-            )
+            perturbed_emb = model_sbert.encode(self.best_text, convert_to_tensor=True, device="cpu")
             similarity = util.cos_sim(original_emb, perturbed_emb).item()
         return {"txt": self.best_text, "img": image}, similarity
 
 
-def move_to_device(
-    value: Any,
-    device: torch.device,
-) -> Any:
+def move_to_device(value: Any, device: torch.device) -> Any:
     """Move tensors, BatchFeatures, or nested dictionaries to one device."""
     if hasattr(value, "to"):
         return value.to(device)
 
     if isinstance(value, dict):
-        return {
-            key: move_to_device(
-                item,
-                device,
-            )
-            for key, item in value.items()
-        }
+        return {key: move_to_device(item, device) for key, item in value.items()}
 
     return value
 
 
 def encode_text_batch(
-    tokenizer: Any,
-    texts: list[str],
-    n_tokens: int,
-    device: torch.device,
-) -> dict[
-    str,
-    torch.Tensor,
-]:
+    tokenizer: Any, texts: list[str], n_tokens: int, device: torch.device
+) -> dict[str, torch.Tensor]:
     tokenized = tokenizer(
         texts,
         return_tensors="pt",
@@ -980,69 +736,45 @@ def encode_text_batch(
         max_length=n_tokens,
     ).to(device)
 
-    return {
-        "input_ids": tokenized.input_ids.unsqueeze(1)
-    }
+    return {"input_ids": tokenized.input_ids.unsqueeze(1)}
 
 
 def encode_image_batch(
-    processor: Any,
-    images: list[Image.Image],
-    device: torch.device,
-) -> dict[
-    str,
-    torch.Tensor,
-]:
-    processed = processor(
-        images=images,
-        return_tensors="pt",
-    ).to(device)
+    processor: Any, images: list[Image.Image], device: torch.device
+) -> dict[str, torch.Tensor]:
+    processed = processor(images=images, return_tensors="pt").to(device)
 
-    pixel_values = processed[
-        "pixel_values"
-    ]
+    pixel_values = processed["pixel_values"]
 
     if pixel_values.ndim == 4:
         pixel_values = pixel_values.unsqueeze(1)
 
-    return {
-        "pixel_values": pixel_values
-    }
+    return {"pixel_values": pixel_values}
 
 
 def append_outputs(
-    accumulator: dict[str, list[torch.Tensor]],
-    *batch_outputs: torch.Tensor,
+    accumulator: dict[str, list[torch.Tensor]], *batch_outputs: torch.Tensor
 ) -> None:
     """Validate and store one batch of fused and component outputs."""
     output_names = ("scores", "logits", *COMPONENT_OUTPUT_NAMES)
     if len(batch_outputs) != len(output_names):
         raise ValueError(
-            f"Expected {len(output_names)} model outputs, "
-            f"received {len(batch_outputs)}"
+            f"Expected {len(output_names)} model outputs, " f"received {len(batch_outputs)}"
         )
 
     named_outputs = dict(zip(output_names, batch_outputs))
-    batch_sizes = {
-        name: value.numel()
-        for name, value in named_outputs.items()
-    }
+    batch_sizes = {name: value.numel() for name, value in named_outputs.items()}
     if len(set(batch_sizes.values())) != 1:
         raise ValueError(f"Mismatched final output sizes: {batch_sizes}")
 
     for name, value in named_outputs.items():
-        accumulator[name].append(
-            value.detach().cpu().reshape(-1)
-        )
+        accumulator[name].append(value.detach().cpu().reshape(-1))
 
 
-
-def scenario_paths(
-    output_dir: Path,
-) -> dict[str, Path]:
-    """Resolve every scenario through the shared path contract."""
+def scenario_paths(output_dir: Path) -> dict[str, Path]:
+    """Resolve every scenario CSV path under the attack output directory."""
     return {
-        scope: Path(late_fusion_scenario_path(output_dir, scope))
+        scope: output_dir / SCENARIO_FILES[scope]
         for scope in ("text", "image", "both")
     }
 
@@ -1060,16 +792,8 @@ def save_parameters(
         "Fusion": {
             "Type": args.fusion,
             "Threshold": args.threshold,
-            "SVM Model": (
-                str(args.svm_model)
-                if args.fusion == "svm-rbf"
-                else None
-            ),
-            "SVM Input": (
-                args.svm_input
-                if args.fusion == "svm-rbf"
-                else None
-            ),
+            "SVM Model": (str(args.svm_model) if args.fusion == "svm-rbf" else None),
+            "SVM Input": (args.svm_input if args.fusion == "svm-rbf" else None),
         },
         "Scenario": scenario,
         "Attack": {
@@ -1077,38 +801,20 @@ def save_parameters(
             "Independent Modalities": True,
             "Alternation": args.optimization != "sum",
             "Optimization": args.optimization,
-            "Interleaved Steps": (
-                args.total_steps if args.optimization != "sum" else None
-            ),
+            "Interleaved Steps": (args.total_steps if args.optimization != "sum" else None),
             "Method": args.attack_method,
             # Which LLM produced the TREPAT rewritings; without it a run
             # cannot be reproduced or compared against another.
-            "TRePAT Model": (
-                ATTACK_MODEL if args.attack_method == "trepat" else None
-            ),
-            "TRePAT Command": (
-                COMMAND if args.attack_method == "trepat" else None
-            ),
+            "TRePAT Model": (ATTACK_MODEL if args.attack_method == "trepat" else None),
+            "TRePAT Command": (COMMAND if args.attack_method == "trepat" else None),
             "Targeted": args.targeted,
-            "Source Label": (
-                args.source_label if args.targeted else "all (per-sample 1-label)"
-            ),
-            "Target Label": (
-                args.target_label if args.targeted else "all (per-sample 1-label)"
-            ),
+            "Source Label": (args.source_label if args.targeted else "all (per-sample 1-label)"),
+            "Target Label": (args.target_label if args.targeted else "all (per-sample 1-label)"),
             "Only Clean-Correct Source Samples": True,
             "Budget Divisor": scope_budgets["divisor"],
             "Budgets Are Effective": True,
-            "PGD Iters": (
-                args.pgd_iters
-                if scenario in {"image", "both"}
-                else None
-            ),
-            "TRePAT Max Variants": (
-                args.max_variants
-                if scenario in {"text", "both"}
-                else None
-            ),
+            "PGD Iters": (args.pgd_iters if scenario in {"image", "both"} else None),
+            "TRePAT Max Variants": (args.max_variants if scenario in {"text", "both"} else None),
             "Epsilon": args.epsilon,
             "Alpha Factor": args.alpha_factor,
             # The step size actually used, so a run can be checked
@@ -1121,45 +827,25 @@ def save_parameters(
             "K (BERT Attack)": args.k,
             "Threshold Pred Score": args.threshold_pred_score,
             "Max Words to Attack": args.max_words_to_attack,
-            "Max Candidates per Word": (
-                args.max_candidates_per_word
-            ),
-            "Max Words for Importance": (
-                args.max_words_for_importance
-            ),
-            "Minimum Text Similarity": (
-                args.min_txt_similarity
-            ),
+            "Max Candidates per Word": (args.max_candidates_per_word),
+            "Max Words for Importance": (args.max_words_for_importance),
+            "Minimum Text Similarity": (args.min_txt_similarity),
         },
         "Text Model Parameters": text_parameters,
         "Image Model Parameters": image_parameters,
     }
 
-    path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    with path.open(
-        "w",
-        encoding="utf-8",
-    ) as handle:
-        json.dump(
-            payload,
-            handle,
-            indent=4,
-        )
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=4)
         handle.write("\n")
 
 
 def main() -> None:
     args, text_parameters, image_parameters = parse_args()
 
-    validate_args(
-        args,
-        text_parameters,
-        image_parameters,
-    )
+    validate_args(args, text_parameters, image_parameters)
 
     device = torch.device(args.device)
     device_mlm = torch.device(args.device_mlm)
@@ -1179,75 +865,42 @@ def main() -> None:
     bertattack_tokenizer = None
     bertattack_mlm = None
 
-    if args.attack_scope in {
-        "text",
-        "both",
-    }:
+    if args.attack_scope in {"text", "both"}:
         if args.attack_method == "trepat":
-            rephraser = Rephraser(
-                model=ATTACK_MODEL,
-                device=device_mlm,
-                command=COMMAND,
-            )
+            rephraser = Rephraser(model=ATTACK_MODEL, device=device_mlm, command=COMMAND)
         else:
-            bertattack_tokenizer = (
-                AutoTokenizer.from_pretrained(
-                    "bert-base-uncased",
-                    use_fast=True,
-                )
-            )
+            bertattack_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased", use_fast=True)
 
-            bertattack_mlm = (
-                AutoModelForMaskedLM.from_pretrained(
-                    "bert-base-uncased"
-                ).to(device_mlm)
+            bertattack_mlm = AutoModelForMaskedLM.from_pretrained("bert-base-uncased").to(
+                device_mlm
             )
 
             bertattack_mlm.eval()
 
-    dataset_classes, load_functions = (
-        load_available_datasets()
-    )
+    dataset_classes, load_functions = load_available_datasets()
 
     if args.dataset not in dataset_classes:
         raise ValueError(
-            f"Unknown dataset {args.dataset!r}; "
-            f"available: {sorted(dataset_classes)}"
+            f"Unknown dataset {args.dataset!r}; " f"available: {sorted(dataset_classes)}"
         )
 
     if args.test_data is None:
-        candidates = sorted(
-            glob.glob(
-                f"data/{args.dataset}/test.*"
-            )
-        )
+        candidates = sorted(glob.glob(f"data/{args.dataset}/test.*"))
 
-        test_data = Path(
-            candidates[0]
-            if candidates
-            else dataset_annotations(args.dataset, "test")
-        )
+        test_data = Path(candidates[0] if candidates else dataset_annotations(args.dataset, "test"))
 
     else:
         test_data = args.test_data
 
     if not test_data.is_file():
-        raise FileNotFoundError(
-            f"Test annotations do not exist: "
-            f"{test_data}"
-        )
+        raise FileNotFoundError(f"Test annotations do not exist: " f"{test_data}")
 
     images_dir = (
-        args.images_dir
-        if args.images_dir is not None
-        else Path(dataset_images_dir(args.dataset))
+        args.images_dir if args.images_dir is not None else Path(dataset_images_dir(args.dataset))
     )
 
     if not images_dir.is_dir():
-        raise FileNotFoundError(
-            f"Image directory does not exist: "
-            f"{images_dir}"
-        )
+        raise FileNotFoundError(f"Image directory does not exist: " f"{images_dir}")
 
     dataset_test = my_datasets.get_dataset(
         dataset_classes[args.dataset],
@@ -1262,14 +915,7 @@ def main() -> None:
     sampler = None
 
     if args.subset_size is not None:
-        sampler = list(
-            range(
-                min(
-                    args.subset_size,
-                    len(dataset_test),
-                )
-            )
-        )
+        sampler = list(range(min(args.subset_size, len(dataset_test))))
 
     dataloader_test = DataLoader(
         dataset_test,
@@ -1282,126 +928,61 @@ def main() -> None:
     output_dir = (
         args.output_dir
         if args.output_dir is not None
-        else (
-            args.results_path
-            / "perturbed"
-            / "late-fusion"
-            / args.fusion
-        )
+        else Path(model_perturbed_dir(args.fusion, "sum", args.dataset))
     )
 
     dump_dir = (
         args.dump_dir
         if args.dump_dir is not None
-        else (
-            Path(LATE_FUSION_DATA_DIR)
-            / args.fusion
-            / args.attack_scope
-        )
+        else (Path(late_fusion_data_dir(args.dataset)) / args.fusion / args.attack_scope)
     )
 
     # Each launcher invocation owns exactly one output scenario, so separate
     # runs cannot overwrite another scenario's artifact.
-    requested_scenarios = {
-        args.attack_scope
-    }
+    requested_scenarios = {args.attack_scope}
 
     active_budgets = []
 
-    if args.attack_scope in {
-        "text",
-        "both",
-    }:
-        active_budgets.append(
-            f"TRePAT max variants={args.max_variants}"
-        )
+    if args.attack_scope in {"text", "both"}:
+        active_budgets.append(f"TRePAT max variants={args.max_variants}")
 
-    if args.attack_scope in {
-        "image",
-        "both",
-    }:
-        active_budgets.append(
-            f"PGD iterations={args.pgd_iters}"
-        )
+    if args.attack_scope in {"image", "both"}:
+        active_budgets.append(f"PGD iterations={args.pgd_iters}")
 
-    print(
-        "Effective attack budget: "
-        f"{', '.join(active_budgets)}"
-    )
+    print("Effective attack budget: " f"{', '.join(active_budgets)}")
 
     output_names = ("scores", "logits", *COMPONENT_OUTPUT_NAMES)
-    outputs = {
-        scenario: {
-            name: []
-            for name in output_names
-        }
-        for scenario in requested_scenarios
-    }
+    outputs = {scenario: {name: [] for name in output_names} for scenario in requested_scenarios}
 
-    labels_list: list[
-        torch.Tensor
-    ] = []
+    labels_list: list[torch.Tensor] = []
 
-    indices_list: list[
-        torch.Tensor
-    ] = []
+    indices_list: list[torch.Tensor] = []
 
-    similarities: list[
-        float
-    ] = []
+    similarities: list[float] = []
 
-    ssims: list[
-        float
-    ] = []
+    ssims: list[float] = []
 
-    perturbed_text_rows: list[
-        dict[str, Any]
-    ] = []
+    perturbed_text_rows: list[dict[str, Any]] = []
 
     attacked_samples = 0
 
-    for (
-        images,
-        labels,
-        texts,
-        _,
-        indices,
-    ) in tqdm(
-        dataloader_test,
-        desc=f"Adversarial {args.fusion} attack",
-        total=len(dataloader_test),
+    for images, labels, texts, _, indices in tqdm(
+        dataloader_test, desc=f"Adversarial {args.fusion} attack", total=len(dataloader_test)
     ):
-        images_device = move_to_device(
-            images,
-            device,
-        )
+        images_device = move_to_device(images, device)
 
-        texts_device = move_to_device(
-            texts,
-            device,
-        )
+        texts_device = move_to_device(texts, device)
 
         with torch.inference_mode():
-            clean_scores, _ = model(
-                images_device,
-                texts_device,
-            )
+            clean_scores, _ = model(images_device, texts_device)
 
-        clean_predictions = (
-            clean_scores
-            .detach()
-            .cpu()
-            .reshape(-1)
-            > args.threshold
-        ).to(torch.int64)
+        clean_predictions = (clean_scores.detach().cpu().reshape(-1) > args.threshold).to(
+            torch.int64
+        )
 
-        perturbed_texts: list[
-            str
-        ] = []
+        perturbed_texts: list[str] = []
 
-        perturbed_images: list[
-            Image.Image
-        ] = []
+        perturbed_images: list[Image.Image] = []
 
         for position, label in tqdm(
             enumerate(labels.tolist()),
@@ -1409,43 +990,27 @@ def main() -> None:
             total=len(labels),
             leave=False,
         ):
-            index = int(
-                indices[position].item()
-            )
+            index = int(indices[position].item())
 
             clean_news = {
-                "txt": dataset_test.texts[
-                    index
-                ],
+                "txt": dataset_test.texts[index],
                 "img": Image.open(
-                    os.path.join(
-                        dataset_test.img_dir,
-                        dataset_test.imgs_path[index],
-                    )
+                    os.path.join(dataset_test.img_dir, dataset_test.imgs_path[index])
                 ).convert("RGB"),
             }
 
-            perturbed_text = clean_news[
-                "txt"
-            ]
-            perturbed_image = clean_news[
-                "img"
-            ]
+            perturbed_text = clean_news["txt"]
+            perturbed_image = clean_news["img"]
             text_similarity = 1.0
             image_ssim = 1.0
 
-            clean_prediction = int(
-                clean_predictions[position].item()
-            )
+            clean_prediction = int(clean_predictions[position].item())
 
             if args.targeted:
                 # Evasion of one class only: fake news pushed to real.
                 source_label = args.source_label
                 target_label = args.target_label
-                should_attack = (
-                    label == args.source_label
-                    and clean_prediction == args.source_label
-                )
+                should_attack = label == args.source_label and clean_prediction == args.source_label
             else:
                 # Untargeted: every sample the model gets right is pushed
                 # toward the opposite class, so both classes are attacked.
@@ -1471,9 +1036,15 @@ def main() -> None:
                     and args.attack_scope in {"text", "both"}
                 ):
                     trepat_state = TrepatStepState(
-                        model, tokenizer, processor, args,
-                        current_news, device, rephraser,
-                        source_label, target_label,
+                        model,
+                        tokenizer,
+                        processor,
+                        args,
+                        current_news,
+                        device,
+                        rephraser,
+                        source_label,
+                        target_label,
                     )
 
                 # "sum" spends each channel's budget in a single pass against a
@@ -1484,16 +1055,10 @@ def main() -> None:
                 for step in range(args.total_steps):
                     text_step = args.optimization == "sum" or step < args.max_variants
                     image_step = args.optimization == "sum" or step < args.pgd_iters
-                    if text_step and args.attack_scope in {
-                        "text",
-                        "both",
-                    }:
+                    if text_step and args.attack_scope in {"text", "both"}:
                         if args.attack_method == "trepat":
                             if args.optimization == "sum":
-                                (
-                                    text_news,
-                                    text_similarity,
-                                ) = fusion_trepat_attack(
+                                text_news, text_similarity = fusion_trepat_attack(
                                     model,
                                     tokenizer,
                                     processor,
@@ -1506,19 +1071,11 @@ def main() -> None:
                                     None,
                                 )
                             else:
-                                (
-                                    text_news,
-                                    text_similarity,
-                                ) = trepat_state.step(
-                                    current_news["img"],
-                                )
+                                text_news, text_similarity = trepat_state.step(current_news["img"])
 
                         else:
                             with torch.no_grad():
-                                (
-                                    text_news,
-                                    text_similarity,
-                                ) = bertattack_attack(
+                                text_news, text_similarity = bertattack_attack(
                                     model,
                                     tokenizer,
                                     processor,
@@ -1531,13 +1088,8 @@ def main() -> None:
                                     device_mlm,
                                 )
 
-                        if (
-                            text_similarity
-                            >= args.min_txt_similarity
-                        ):
-                            perturbed_text = text_news[
-                                "txt"
-                            ]
+                        if text_similarity >= args.min_txt_similarity:
+                            perturbed_text = text_news["txt"]
                         else:
                             text_similarity = 1.0
 
@@ -1551,56 +1103,29 @@ def main() -> None:
 
                         # Alternating rounds feed the current adversarial text
                         # forward, so the image attack of the next round sees it.
-                        current_news = {
-                            "txt": perturbed_text,
-                            "img": current_news["img"],
-                        }
+                        current_news = {"txt": perturbed_text, "img": current_news["img"]}
 
-                    if image_step and args.attack_scope in {
-                        "image",
-                        "both",
-                    }:
-                        (
-                            image_news,
-                            image_ssim,
-                            round_clean_pixels,
-                        ) = img_perturbation(
+                    if image_step and args.attack_scope in {"image", "both"}:
+                        image_news, image_ssim, round_clean_pixels = img_perturbation(
                             model,
                             tokenizer,
                             processor,
                             args,
                             current_news,
-                            torch.tensor(
-                                [label],
-                                device=device,
-                            ),
+                            torch.tensor([label], device=device),
                             steps=(None if args.optimization == "sum" else 1),
                             # Randomise only the first step; later ones must
                             # continue from the image already perturbed.
                             random_start=(args.optimization == "sum" or step == 0),
                         )
 
-                        perturbed_image = image_news[
-                            "img"
-                        ]
+                        perturbed_image = image_news["img"]
 
                         image_ssim = float(
-                            image_ssim.item()
-                            if hasattr(
-                                image_ssim,
-                                "item",
-                            )
-                            else image_ssim
+                            image_ssim.item() if hasattr(image_ssim, "item") else image_ssim
                         )
 
-                        save_perturbed_image(
-                            str(
-                                dump_dir
-                                / "images"
-                            ),
-                            index,
-                            perturbed_image,
-                        )
+                        save_perturbed_image(str(dump_dir / "images"), index, perturbed_image)
 
                         if clean_pixels is None:
                             clean_pixels = round_clean_pixels
@@ -1609,55 +1134,27 @@ def main() -> None:
                         # original image, not of the previous round's output.
                         if args.optimization != "sum":
                             perturbed_image = project_to_epsilon_ball(
-                                perturbed_image,
-                                clean_pixels,
-                                args.epsilon,
+                                perturbed_image, clean_pixels, args.epsilon
                             )
 
-                        current_news = {
-                            "txt": current_news["txt"],
-                            "img": perturbed_image,
-                        }
+                        current_news = {"txt": current_news["txt"], "img": perturbed_image}
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-            perturbed_texts.append(
-                perturbed_text
-            )
-            perturbed_images.append(
-                perturbed_image
-            )
-            similarities.append(
-                float(text_similarity)
-            )
-            ssims.append(
-                float(image_ssim)
-            )
+            perturbed_texts.append(perturbed_text)
+            perturbed_images.append(perturbed_image)
+            similarities.append(float(text_similarity))
+            ssims.append(float(image_ssim))
 
         encoded_texts = None
         encoded_images = None
 
-        if args.attack_scope in {
-            "text",
-            "both",
-        }:
-            encoded_texts = encode_text_batch(
-                tokenizer,
-                perturbed_texts,
-                args.n_tokens,
-                device,
-            )
+        if args.attack_scope in {"text", "both"}:
+            encoded_texts = encode_text_batch(tokenizer, perturbed_texts, args.n_tokens, device)
 
-        if args.attack_scope in {
-            "image",
-            "both",
-        }:
-            encoded_images = encode_image_batch(
-                processor,
-                perturbed_images,
-                device,
-            )
+        if args.attack_scope in {"image", "both"}:
+            encoded_images = encode_image_batch(processor, perturbed_images, device)
 
         scenario_inputs = {
             "text": (images_device, encoded_texts),
@@ -1667,89 +1164,37 @@ def main() -> None:
 
         with torch.inference_mode():
             for scenario in sorted(requested_scenarios):
-                scenario_outputs = model(
-                    *scenario_inputs[scenario],
-                    return_components=True,
-                )
-                append_outputs(
-                    outputs[scenario],
-                    *scenario_outputs,
-                )
+                scenario_outputs = model(*scenario_inputs[scenario], return_components=True)
+                append_outputs(outputs[scenario], *scenario_outputs)
 
-        labels_list.append(
-            torch.as_tensor(
-                labels
-            )
-            .detach()
-            .cpu()
-            .reshape(-1)
-        )
+        labels_list.append(torch.as_tensor(labels).detach().cpu().reshape(-1))
 
-        indices_list.append(
-            torch.as_tensor(
-                indices
-            )
-            .detach()
-            .cpu()
-            .reshape(-1)
-        )
+        indices_list.append(torch.as_tensor(indices).detach().cpu().reshape(-1))
 
     if not labels_list:
-        raise ValueError(
-            "The test dataloader produced no samples"
-        )
+        raise ValueError("The test dataloader produced no samples")
 
-    y_true = torch.cat(
-        labels_list
-    ).numpy()
+    y_true = torch.cat(labels_list).numpy()
 
-    sample_indices = torch.cat(
-        indices_list
-    ).numpy()
+    sample_indices = torch.cat(indices_list).numpy()
 
-    paths = scenario_paths(
-        output_dir
-    )
+    paths = scenario_paths(output_dir)
 
-    for scenario in sorted(
-        requested_scenarios
-    ):
-        scores = (
-            torch.cat(
-                outputs[scenario]["scores"]
-            )
-            .numpy()
-            .reshape(-1)
-        )
+    for scenario in sorted(requested_scenarios):
+        scores = torch.cat(outputs[scenario]["scores"]).numpy().reshape(-1)
 
-        logits = (
-            torch.cat(
-                outputs[scenario]["logits"]
-            )
-            .numpy()
-            .reshape(-1)
-        )
+        logits = torch.cat(outputs[scenario]["logits"]).numpy().reshape(-1)
 
         component_outputs = {
             column: torch.cat(outputs[scenario][name]).numpy().reshape(-1)
-            for column, name in zip(
-                COMPONENT_OUTPUT_COLUMNS,
-                COMPONENT_OUTPUT_NAMES,
-            )
+            for column, name in zip(COMPONENT_OUTPUT_COLUMNS, COMPONENT_OUTPUT_NAMES)
         }
 
-        predictions = (
-            scores > args.threshold
-        ).astype(np.int64)
+        predictions = (scores > args.threshold).astype(np.int64)
 
-        result_path = paths[
-            scenario
-        ]
+        result_path = paths[scenario]
 
-        result_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        result_path.parent.mkdir(parents=True, exist_ok=True)
 
         save_predictions(
             y_true,
@@ -1758,43 +1203,23 @@ def main() -> None:
             logits,
             sample_indices,
             str(result_path),
-            ssims=(
-                np.asarray(ssims)
-                if scenario in {
-                    "image",
-                    "both",
-                }
-                else None
-            ),
-            txt_similarities=(
-                np.asarray(similarities)
-                if scenario in {
-                    "text",
-                    "both",
-                }
-                else None
-            ),
+            ssims=(np.asarray(ssims) if scenario in {"image", "both"} else None),
+            txt_similarities=(np.asarray(similarities) if scenario in {"text", "both"} else None),
             extra_columns=component_outputs,
         )
 
         save_parameters(
-            result_path.parent
-            / "parameters.json",
+            result_path.parent / "parameters.json",
             scenario,
             args,
             text_parameters,
             image_parameters,
         )
 
-        print(
-            f"Saved {result_path}"
-        )
+        print(f"Saved {result_path}")
 
     if perturbed_text_rows:
-        save_perturbed_texts(
-            str(dump_dir),
-            perturbed_text_rows,
-        )
+        save_perturbed_texts(str(dump_dir), perturbed_text_rows)
 
     mode_desc = "targeted (fake→real)" if args.targeted else "untargeted (all clean-correct)"
     print(

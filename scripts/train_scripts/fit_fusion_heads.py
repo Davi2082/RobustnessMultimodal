@@ -25,17 +25,18 @@ from tqdm import tqdm
 
 from configuration_files.configuration import (
     BATCH_SIZE,
-    DEVICES,
-    IMAGE_WEIGHTS_PATH,
+    DATASET,
     RAND_SEED,
     N_TOKENS,
     NAME_IMG_EMBED,
     NAME_LLM,
-    TEXT_WEIGHTS_PATH,
+    dataset_devices,
+    image_weights_path,
+    text_weights_path,
 )
-from configuration_files.paths import RESULT_PATH
+from configuration_files.paths import dataset_result_root
 from data_loading import my_datasets
-from models.fusion import HEAD_METADATA, fusion_head_path
+from models.fusion import fusion_head_path, head_metadata_path
 from scripts.utils.utils import load_available_datasets, load_model
 
 SPLIT_FILES = {
@@ -64,7 +65,7 @@ def images_dir(dataset: str) -> str:
 def unimodal_logits(args, device, dataset_classes, load_functions) -> pd.DataFrame:
     """Clean logits of both unimodal branches on one split, cached to disk."""
     cache = os.path.join(
-        RESULT_PATH, "fusion_analysis", f"{args.split}_unimodal_logits_clean.csv"
+        dataset_result_root(args.dataset), "fusion_analysis", f"{args.split}_unimodal_logits_clean.csv"
     )
     if os.path.exists(cache) and not args.force:
         print(f"using cached {cache}")
@@ -73,8 +74,8 @@ def unimodal_logits(args, device, dataset_classes, load_functions) -> pd.DataFra
     annotations = split_path(args.dataset, args.split)
     columns = {}
     for modality, weights, encoder in (
-        ("text", TEXT_WEIGHTS_PATH, NAME_IMG_EMBED),
-        ("image", IMAGE_WEIGHTS_PATH, NAME_IMG_EMBED),
+        ("text", text_weights_path(args.dataset), NAME_IMG_EMBED),
+        ("image", image_weights_path(args.dataset), NAME_IMG_EMBED),
     ):
         args.modality, args.model_path, args.name_img_embed = modality, weights, encoder
         model, tokenizer, processor = load_model(device, args)
@@ -158,7 +159,7 @@ def fit_heads(frame: pd.DataFrame, seed: int, input_space: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default="Recovery")
+    parser.add_argument("--dataset", default=DATASET)
     parser.add_argument(
         "--split",
         choices=tuple(SPLIT_FILES),
@@ -178,7 +179,8 @@ def parse_args():
     parser.add_argument("--n_tokens", type=int, default=N_TOKENS)
     parser.add_argument("--name_llm", default=NAME_LLM)
     parser.add_argument("--seed", type=int, default=RAND_SEED)
-    parser.add_argument("--device", default=DEVICES[0])
+    parser.add_argument("--device", default=None,
+                        help="GPU device. Defaults to the dataset's configured device.")
     parser.add_argument("--force", action="store_true", help="Recompute logits.")
     parser.add_argument("--set_params", type=bool, default=True)
     parser.add_argument("--merge_tokens", type=int, default=0)
@@ -186,7 +188,10 @@ def parse_args():
     parser.add_argument("--lora_alpha", type=int, default=8)
     parser.add_argument("--lora_r", type=int, default=8)
     parser.add_argument("--lora_dropout", type=float, default=0.4)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.device is None:
+        args.device = dataset_devices(args.dataset)[0]
+    return args
 
 
 def main():
@@ -210,7 +215,7 @@ def main():
         "heads": {},
     }
     for rule, head in heads.items():
-        path = fusion_head_path(rule)
+        path = fusion_head_path(rule, args.dataset)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         joblib.dump(head.best_estimator_, path)
         metadata["heads"][rule] = {
@@ -219,10 +224,11 @@ def main():
         }
         print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
 
-    with open(HEAD_METADATA, "w", encoding="utf-8") as handle:
+    metadata_path = head_metadata_path(args.dataset)
+    with open(metadata_path, "w", encoding="utf-8") as handle:
         json.dump(metadata, handle, indent=4)
         handle.write("\n")
-    print(f"wrote {HEAD_METADATA}")
+    print(f"wrote {metadata_path}")
 
 
 if __name__ == "__main__":

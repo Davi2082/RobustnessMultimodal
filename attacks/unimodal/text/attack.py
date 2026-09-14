@@ -37,11 +37,11 @@ from configuration_files.configuration import (
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
     MIN_TXT_SIMILARITY,
-    DEVICES,
-    DEVICE_MLM,
     SUBSET_SIZE,
+    dataset_device_mlm,
+    dataset_devices,
 )
-from configuration_files.paths import RESULT_PATH, CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT
+from configuration_files.paths import CLEAN_TEXT_PARAMS, DATA_PERTURBED_TEXT, model_perturbed_dir
 from data_loading import my_datasets
 from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
 
@@ -80,7 +80,7 @@ def main():
                         help="Attack only source-label samples; default is untargeted.")
     parser.add_argument("--source_label", type=int, default=SOURCE_LABEL, choices=(0,1))
     parser.add_argument("--target_label", type=int, default=TARGET_LABEL, choices=(0,1))
-    parser.add_argument("--results_path", type=str, default=RESULT_PATH)
+    parser.add_argument("--results_path", type=str, default=None)
     parser.add_argument("--k", type=int, default=K_BERT_ATTACK)
     parser.add_argument("--threshold_pred_score", type=bool, default=THRESHOLD_PRED_SCORE)
     parser.add_argument("--max_words_to_attack", type=int, default=MAX_WORDS_TO_ATTACK)
@@ -89,11 +89,15 @@ def main():
     parser.add_argument("--min_txt_similarity", type=float, default=MIN_TXT_SIMILARITY)
     parser.add_argument("--attack_method", type=str, default="trepat", choices=["trepat", "bertattack"])
     parser.add_argument("--experiment-name", default=None)
+    parser.add_argument("--device", type=str, default=None,
+                        help="GPU device. Defaults to the dataset's configured device.")
+    parser.add_argument("--device-mlm", type=str, default=None,
+                        help="TREPAT rewriter / BERT MLM device. Defaults to the dataset's configured MLM device.")
     args = parser.parse_args()
 
     # Device setting
-    device = torch.device(DEVICES[0])
-    device_mlm = torch.device(DEVICE_MLM)
+    device = torch.device(args.device or dataset_devices(args.dataset)[0])
+    device_mlm = torch.device(args.device_mlm or dataset_device_mlm(args.dataset))
 
     # Model with relative tokenizer and processor loading
     model, tokenizer, processor = load_model(device, args, args.model_path)
@@ -116,8 +120,9 @@ def main():
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
 
-    # Results dir setup (separate subdir per attack method to avoid overwriting)
-    output_dir = os.path.join(args.results_path, "perturbed", "text", args.experiment_name or args.attack_method)
+    # Results dir setup — results/<dataset>/text/perturbed/<attack>/
+    attack_name = args.experiment_name or args.attack_method
+    output_dir = model_perturbed_dir("text", attack_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination

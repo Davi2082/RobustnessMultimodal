@@ -21,23 +21,27 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from configuration_files.configuration import (
-    DATASET, NAME_IMG_EMBED, FF_WEIGHTS_PATH, LATE_FUSION_INPUT,
+    NAME_IMG_EMBED, LATE_FUSION_INPUT, ff_weights_path,
 )
-from configuration_files.paths import DATASET_WEIGHTS_DIR
+from configuration_files.paths import dataset_weights_dir
 
 HEAD_FILES = {"svm-rbf": "svm_rbf_head.pkl", "linear": "linear_head.pkl"}
-HEAD_METADATA = os.path.join(DATASET_WEIGHTS_DIR, "fusion_heads.json")
 
 
-def fusion_head_path(rule: str) -> str:
+def head_metadata_path(dataset: str | None = None) -> str:
+    return os.path.join(dataset_weights_dir(dataset), "fusion_heads.json")
+
+
+def fusion_head_path(rule: str, dataset: str | None = None) -> str:
     """Where the fitted head for a learned rule is stored."""
-    return os.path.join(DATASET_WEIGHTS_DIR, HEAD_FILES[rule])
+    return os.path.join(dataset_weights_dir(dataset), HEAD_FILES[rule])
 
 
-def head_input_space() -> str:
+def head_input_space(dataset: str | None = None) -> str:
     """Feature space the stored heads were fitted on."""
-    if os.path.exists(HEAD_METADATA):
-        with open(HEAD_METADATA, encoding="utf-8") as handle:
+    metadata_path = head_metadata_path(dataset)
+    if os.path.exists(metadata_path):
+        with open(metadata_path, encoding="utf-8") as handle:
             return json.load(handle).get("input_space", LATE_FUSION_INPUT)
     return LATE_FUSION_INPUT
 
@@ -93,9 +97,9 @@ def model_args_from_parameters(
     )
 
 
-def load_pytorch_head(rule: str, device="cpu") -> torch.nn.Module:
+def load_pytorch_head(rule: str, dataset: str | None = None, device="cpu") -> torch.nn.Module:
     """Load a fitted sklearn head and return the equivalent PyTorch module."""
-    path = fusion_head_path(rule)
+    path = fusion_head_path(rule, dataset)
     if not os.path.exists(path):
         raise FileNotFoundError(f"No fitted {rule} head at {path}")
     fitted = joblib.load(path)
@@ -104,9 +108,9 @@ def load_pytorch_head(rule: str, device="cpu") -> torch.nn.Module:
     return linear_fusion_from_sklearn(fitted).to(device).eval()
 
 
-def pytorch_head_score(rule: str, features, device="cpu"):
+def pytorch_head_score(rule: str, features, dataset: str | None = None, device="cpu"):
     """Run a learned fusion head on numpy features, returning numpy scores."""
-    head = load_pytorch_head(rule, device)
+    head = load_pytorch_head(rule, dataset, device)
     with torch.no_grad():
         t = torch.as_tensor(features, dtype=torch.float32, device=device)
         return head(t).cpu().numpy()
@@ -326,11 +330,12 @@ def build_classifier(args, device):
     from scripts.utils.utils import load_model
 
     if args.fusion == "feature-fusion":
+        ff_path = ff_weights_path(args.dataset)
         ff_args = model_args_from_parameters(
-            args.text_parameters_data, "feature-fusion", Path(FF_WEIGHTS_PATH)
+            args.text_parameters_data, "feature-fusion", Path(ff_path)
         )
         ff_args.name_img_embed = NAME_IMG_EMBED
-        model, tokenizer, processor = load_model(device, ff_args, str(FF_WEIGHTS_PATH))
+        model, tokenizer, processor = load_model(device, ff_args, ff_path)
         return FeatureFusionClassifier(model).to(device).eval(), tokenizer, processor
 
     if args.fusion not in LATE_FUSION_RULES:
@@ -343,7 +348,7 @@ def build_classifier(args, device):
 
     fusion_head = None
     if args.fusion in LEARNED_RULES:
-        head_path = fusion_head_path(args.fusion)
+        head_path = fusion_head_path(args.fusion, args.dataset)
         if not os.path.exists(head_path):
             raise FileNotFoundError(
                 f"No fitted {args.fusion} head at {head_path}. "
@@ -357,7 +362,7 @@ def build_classifier(args, device):
 
     classifier = LateFusionClassifier(
         text_model=text_model, image_model=image_model,
-        fusion=args.fusion, svm_fusion=fusion_head, svm_input=head_input_space(),
+        fusion=args.fusion, svm_fusion=fusion_head, svm_input=head_input_space(args.dataset),
     ).to(device)
     classifier.eval()
     return classifier, tokenizer, processor

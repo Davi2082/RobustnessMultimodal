@@ -19,8 +19,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-from configuration_files.configuration import DATASET, DEVICES, THRESHOLD
-from configuration_files.paths import DATASET_WEIGHTS_DIR
+from configuration_files.configuration import DATASET, THRESHOLD, dataset_devices
 from scripts.utils.devices import resolve_devices
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
@@ -34,7 +33,7 @@ def run(cmd):
     subprocess.run(cmd, check=True)
 
 
-def fuse_scores(s_txt, s_img, mode, head_dir):
+def fuse_scores(s_txt, s_img, mode, dataset):
     """Apply a fusion rule to text and image score arrays."""
     if mode == "mean":
         return (s_txt + s_img) / 2
@@ -44,10 +43,10 @@ def fuse_scores(s_txt, s_img, mode, head_dir):
         return np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
         from models.fusion import pytorch_head_score, fusion_head_path
-        if not os.path.isfile(fusion_head_path(mode)):
+        if not os.path.isfile(fusion_head_path(mode, dataset)):
             return None
         X = np.column_stack([s_txt, s_img])
-        return pytorch_head_score(mode, X)
+        return pytorch_head_score(mode, X, dataset)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
@@ -63,7 +62,7 @@ def compute_metrics(y_true, scores, threshold=THRESHOLD):
     return auc, f1, acc
 
 
-def late_fusion_ablation(text_csv, image_csv, output_dir, head_dir):
+def late_fusion_ablation(text_csv, image_csv, output_dir, dataset):
     """Compute late-fusion metrics under missing-modality conditions."""
     df_txt = pd.read_csv(text_csv)
     df_img = pd.read_csv(image_csv)
@@ -73,9 +72,9 @@ def late_fusion_ablation(text_csv, image_csv, output_dir, head_dir):
 
     rows = []
     for mode in LATE_FUSION_MODES:
-        both = fuse_scores(s_txt, s_img, mode, head_dir)
-        img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, mode, head_dir)
-        txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), mode, head_dir)
+        both = fuse_scores(s_txt, s_img, mode, dataset)
+        img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, mode, dataset)
+        txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), mode, dataset)
 
         if both is None or img_only is None or txt_only is None:
             print(f"  [SKIP] {mode} — fitted head not found")
@@ -112,18 +111,20 @@ def late_fusion_ablation(text_csv, image_csv, output_dir, head_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default=DATASET)
-    parser.add_argument("--devices", nargs="+", default=DEVICES, metavar="DEV",
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'.")
+    parser.add_argument("--devices", nargs="+", default=None, metavar="DEV",
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. "
+                             "Defaults to the dataset's configured devices.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if results already exist.")
     args = parser.parse_args()
 
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
     args.devices = resolve_devices(args.devices)
 
-    result_path = f"results/{args.dataset}/classification_results"
-    clean_text_csv = os.path.join(result_path, "clean", "text", "results.csv")
-    clean_image_csv = os.path.join(result_path, "clean", "image", "results.csv")
-    head_dir = DATASET_WEIGHTS_DIR
+    from configuration_files.paths import model_clean_dir, model_ablation_dir
+    clean_text_csv = os.path.join(model_clean_dir("text", args.dataset), "results.csv")
+    clean_image_csv = os.path.join(model_clean_dir("image", args.dataset), "results.csv")
 
     print("=" * 70)
     print(f"MISSING-MODALITY ABLATION — {args.dataset}")
@@ -132,8 +133,8 @@ def main():
 
     t0 = time.time()
 
-    ff_ablation_dir = os.path.join(result_path, "ablation", "feature-fusion")
-    lf_ablation_dir = os.path.join(result_path, "ablation", "late-fusion")
+    ff_ablation_dir = model_ablation_dir("feature-fusion", args.dataset)
+    lf_ablation_dir = model_ablation_dir("late-fusion", args.dataset)
 
     dev_args = ["--devices"] + args.devices
 
@@ -164,7 +165,7 @@ def main():
             print("       Run scripts.main_scripts.run_clean first.")
             sys.exit(1)
 
-        late_fusion_ablation(clean_text_csv, clean_image_csv, lf_ablation_dir, head_dir)
+        late_fusion_ablation(clean_text_csv, clean_image_csv, lf_ablation_dir, args.dataset)
 
     # ── Combined summary ──
     ff_metrics_csv = os.path.join(ff_ablation_dir, "modality_ablation_metrics.csv")

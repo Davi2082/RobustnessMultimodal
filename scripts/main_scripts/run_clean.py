@@ -20,13 +20,13 @@ import numpy as np
 import pandas as pd
 
 from configuration_files.configuration import (
-    IMAGE_WEIGHTS_PATH, DATASET, DEVICES, NAME_IMG_EMBED, THRESHOLD,
+    DATASET, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, THRESHOLD,
+    dataset_devices, image_weights_path,
 )
-from configuration_files.paths import DATASET_WEIGHTS_DIR, RESULT_PATH
 from scripts.utils.devices import resolve_devices
 
 
-def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, head_dir, threshold=THRESHOLD):
+def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, dataset, threshold=THRESHOLD):
     df_txt = pd.read_csv(text_csv)
     df_img = pd.read_csv(image_csv)
     assert len(df_txt) == len(df_img), "Text and image CSVs have different lengths"
@@ -41,10 +41,11 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, head_dir, thres
         scores = np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
         from models.fusion import pytorch_head_score, fusion_head_path
-        if not os.path.isfile(fusion_head_path(mode)):
-            print(f"  [SKIP] Fitted head not found: {fusion_head_path(mode)}")
+        head_path = fusion_head_path(mode, dataset)
+        if not os.path.isfile(head_path):
+            print(f"  [SKIP] Fitted head not found: {head_path}")
             return
-        scores = pytorch_head_score(mode, np.column_stack([s_txt, s_img]))
+        scores = pytorch_head_score(mode, np.column_stack([s_txt, s_img]), dataset)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
@@ -67,17 +68,18 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, head_dir, thres
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default=DATASET)
-    parser.add_argument("--devices", nargs="+", default=DEVICES, metavar="DEV",
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'.")
+    parser.add_argument("--devices", nargs="+", default=None, metavar="DEV",
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. "
+                             "Defaults to the dataset's configured devices.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if results already exist.")
     args = parser.parse_args()
 
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
     args.devices = resolve_devices(args.devices)
 
-    result_path = f"results/{args.dataset}/classification_results"
-    clean_base = os.path.join(result_path, "clean")
-    head_dir = DATASET_WEIGHTS_DIR
+    from configuration_files.paths import model_clean_dir
 
     dev_str = ", ".join(args.devices)
     print("=" * 70)
@@ -89,14 +91,14 @@ def main():
 
     # GPU eval jobs (text, image, feature-fusion) — sequential, each uses DataParallel internally
     jobs = [
-        ("text",           os.path.join(clean_base, "text", "results.csv"),
+        ("text",           os.path.join(model_clean_dir("text", args.dataset), "results.csv"),
          [sys.executable, "-m", "scripts.utils.eval",
           "--modality", "text", "--dataset", args.dataset] + ["--devices"] + args.devices),
-        ("image",          os.path.join(clean_base, "image", "results.csv"),
+        ("image",          os.path.join(model_clean_dir("image", args.dataset), "results.csv"),
          [sys.executable, "-m", "scripts.utils.eval",
           "--modality", "image", "--dataset", args.dataset,
-          "--name_img_embed", NAME_IMG_EMBED, "--model_path", IMAGE_WEIGHTS_PATH] + ["--devices"] + args.devices),
-        ("feature-fusion", os.path.join(clean_base, "feature-fusion", "results.csv"),
+          "--name_img_embed", NAME_IMG_EMBED, "--model_path", image_weights_path(args.dataset)] + ["--devices"] + args.devices),
+        ("feature-fusion", os.path.join(model_clean_dir("feature-fusion", args.dataset), "results.csv"),
          [sys.executable, "-m", "scripts.utils.eval",
           "--modality", "feature-fusion", "--dataset", args.dataset] + ["--devices"] + args.devices),
     ]
@@ -113,8 +115,8 @@ def main():
             print(f"  FAILED (exit {rc})")
 
     # Late-fusion (CPU, always sequential)
-    clean_text_csv = os.path.join(clean_base, "text", "results.csv")
-    clean_image_csv = os.path.join(clean_base, "image", "results.csv")
+    clean_text_csv = os.path.join(model_clean_dir("text", args.dataset), "results.csv")
+    clean_image_csv = os.path.join(model_clean_dir("image", args.dataset), "results.csv")
 
     print("\n" + "=" * 70)
     print("LATE-FUSION (post-hoc from text + image CSVs)")
@@ -127,14 +129,14 @@ def main():
         print(f"ERROR: {clean_image_csv} not found — run image eval first.")
         sys.exit(1)
 
-    for mode in ("min", "mean", "max", "svm-rbf", "linear"):
-        output_dir = os.path.join(clean_base, "late-fusion", mode)
+    for mode in PIPELINE_LATE_FUSION_MODES:
+        output_dir = model_clean_dir(mode, args.dataset)
         lf_csv = os.path.join(output_dir, "results.csv")
         if not args.force and os.path.isfile(lf_csv):
             print(f"  {mode} — SKIP")
             continue
         print(f"  {mode}")
-        late_fusion_from_csvs(clean_text_csv, clean_image_csv, mode, output_dir, head_dir)
+        late_fusion_from_csvs(clean_text_csv, clean_image_csv, mode, output_dir, args.dataset)
 
     elapsed = time.time() - t0
     print(f"\nCLEAN EVALUATION COMPLETE ({elapsed/60:.1f} min)")

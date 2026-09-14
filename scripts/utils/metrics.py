@@ -2,14 +2,9 @@ import os, json, argparse
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_curve, auc
-from configuration_files.paths import RESULT_PATH
+from configuration_files.configuration import ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS
+from configuration_files.paths import model_clean_dir, model_perturbed_dir
 from scripts.utils.utils import compute_metrics, plot_confusion_matrix, build_curve_name, update_roc_cache, regenerate_plot
-
-ATTACK_DIRS = {
-    "pgd": "late-fusion-pgd", "trepat": "late-fusion-trepat",
-    "sum": "late-fusion", "interleaved": "late-fusion-interleaved",
-    "joint": "late-fusion-joint",
-}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -18,17 +13,15 @@ if __name__ == "__main__":
                         choices=["feature-fusion", "intermediate-fusion", "late-fusion", "text", "image"])
     parser.add_argument("--mode", type=str, choices=["mean", "min", "max", "svm-rbf", "linear", "feature-fusion"],
                         help="Fusion method (required for late-fusion modality).")
-    parser.add_argument("--perturbation_type", type=str, choices=["biperturbed", "image-perturbed", "text-perturbed"])
-    parser.add_argument("--attack", type=str, choices=list(ATTACK_DIRS.keys()), default="sum",
-                        help="Attack type — determines which output directory to read from.")
+    parser.add_argument("--perturbation_type", type=str,
+                        help="Only affects the ROC curve name.")
+    parser.add_argument("--attack", type=str, choices=list(ATTACK_SCOPE.keys()), default="sum",
+                        help="Attack type — determines which perturbed directory to read from.")
     parser.add_argument("--roc-set", type=str, help="Name of ROC comparison group")
+    parser.add_argument("--dataset", type=str, default=DATASET)
     args = parser.parse_args()
 
-    if args.type == "perturbed" and args.modality == "feature-fusion" and args.perturbation_type is None:
-        parser.error("--perturbation_type is required for feature-fusion when --type is perturbed")
-    elif args.type == "clean":
-        args.perturbation_type = ""
-    elif args.perturbation_type is None:
+    if args.type == "clean":
         args.perturbation_type = ""
 
     if args.modality == "late-fusion" and args.mode is None:
@@ -36,20 +29,22 @@ if __name__ == "__main__":
     elif args.modality != "late-fusion":
         args.mode = ""
 
-    if args.modality == "feature-fusion" and args.type == "perturbed":
-        base = os.path.join(RESULT_PATH, "perturbed", "feature-fusion")
-        fname_map = {"biperturbed": "perturbed_results.csv",
-                     "text-perturbed": "txts_perturbed_results.csv",
-                     "image-perturbed": "imgs_perturbed_results.csv"}
-        results_file = fname_map[args.perturbation_type]
-    elif args.modality == "late-fusion" and args.type == "perturbed":
-        base = os.path.join(RESULT_PATH, "perturbed", ATTACK_DIRS[args.attack], args.mode)
-        if args.perturbation_type in ("image-perturbed", "text-perturbed"):
-            base = os.path.join(base, args.perturbation_type)
+    # Resolve the model/fusion name used as the directory
+    if args.modality in ("late-fusion", "feature-fusion") and args.type == "perturbed":
+        fusion_name = args.mode or "feature-fusion"
+        base = model_perturbed_dir(fusion_name, args.attack, args.dataset)
         results_file = "perturbed_results.csv"
+    elif args.modality in ("text", "image") and args.type == "perturbed":
+        base = model_perturbed_dir(args.modality, args.attack, args.dataset)
+        results_file = "perturbed_results.csv"
+    elif args.type == "clean":
+        if args.modality == "late-fusion":
+            base = model_clean_dir(args.mode, args.dataset)
+        else:
+            base = model_clean_dir(args.modality, args.dataset)
+        results_file = "results.csv"
     else:
-        results_file = f"{'perturbed_' if args.type == 'perturbed' else ''}results.csv"
-        base = os.path.join(RESULT_PATH, args.type, args.modality, args.mode, args.perturbation_type)
+        parser.error(f"Unsupported combination: --type {args.type} --modality {args.modality}")
 
     csv_path = os.path.join(base, results_file)
     if not os.path.isfile(csv_path):

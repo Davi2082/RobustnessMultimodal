@@ -62,9 +62,8 @@ from configuration_files.paths import (
     dataset_images_dir,
     CLEAN_IMAGE_PARAMS,
     CLEAN_TEXT_PARAMS,
-    LATE_FUSION_DATA_DIR,
-    RESULT_PATH,
-    late_fusion_scenario_path,
+    late_fusion_data_dir,
+    model_perturbed_dir,
 )
 from scripts.utils.utils import (
     load_available_datasets,
@@ -382,13 +381,14 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     parser.add_argument("--device", default=DEVICES[0])
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--dump-dir", type=Path, default=None)
-    parser.add_argument("--results-path", type=Path, default=Path(RESULT_PATH))
+    parser.add_argument("--dataset", type=str, default=None)
     args = parser.parse_args()
 
     text_parameters = read_parameters(args.text_parameters, "Text model")
     image_parameters = read_parameters(args.image_parameters, "Image model")
 
-    args.dataset = text_parameters["Dataset"]
+    if args.dataset is None:
+        args.dataset = text_parameters["Dataset"]
     args.n_tokens = int(text_parameters["Number of Tokens"])
     args.text_model_path = Path(text_parameters["Model Path"])
     args.image_model_path = Path(image_parameters["Model Path"])
@@ -485,11 +485,9 @@ def main() -> None:
         num_workers=args.num_workers,
     )
 
-    output_dir = args.output_dir or (
-        args.results_path / "perturbed" / "late-fusion-joint" / args.fusion
-    )
+    output_dir = args.output_dir or Path(model_perturbed_dir(args.fusion, "joint", args.dataset))
     dump_dir = args.dump_dir or (
-        Path(LATE_FUSION_DATA_DIR) / "joint" / args.fusion / args.attack_scope
+        Path(late_fusion_data_dir(args.dataset)) / "joint" / args.fusion / args.attack_scope
     )
 
     output_names = ("scores", "logits", *COMPONENT_OUTPUT_NAMES)
@@ -588,7 +586,7 @@ def main() -> None:
     }
     components["hotflip_flips"] = np.asarray(flips_list)
 
-    result_path = Path(late_fusion_scenario_path(output_dir, args.attack_scope))
+    result_path = output_dir / "perturbed_results.csv"
     result_path.parent.mkdir(parents=True, exist_ok=True)
     save_predictions(
         y_true,

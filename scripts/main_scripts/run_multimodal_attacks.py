@@ -30,48 +30,49 @@ import argparse, os, subprocess, sys, threading, time
 from queue import Queue
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from configuration_files.configuration import DATASET, DEVICES
+from configuration_files.configuration import (
+    ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS, PIPELINE_FUSIONS, dataset_devices,
+)
+from configuration_files.paths import clean_image_params, clean_text_params, model_perturbed_dir, train_svm_model
 from scripts.utils.devices import resolve_devices
 
-FUSIONS = ["min", "mean", "max", "svm-rbf", "linear", "feature-fusion"]
-ATTACKS = ["pgd", "trepat", "sum", "interleaved"] #, "joint"
+FUSIONS = PIPELINE_FUSIONS
+ATTACKS = PIPELINE_ATTACKS
 LOG_DIR = "logs/multimodal_attacks"
 
-ATTACK_DIRS = {
-    "pgd": "late-fusion-pgd", "trepat": "late-fusion-trepat",
-    "sum": "late-fusion", "interleaved": "late-fusion-interleaved",
-    "joint": "late-fusion-joint",
-}
-ATTACK_SCOPE = {
-    "pgd": "image", "trepat": "text",
-    "sum": "both", "interleaved": "both", "joint": "both",
-}
 
-
-def build_cmd(attack, fusion, device, result_path):
+def build_cmd(attack, fusion, device, dataset):
     scope = ATTACK_SCOPE[attack]
-    output_dir = os.path.join(result_path, "perturbed", ATTACK_DIRS[attack], fusion)
+    output_dir = model_perturbed_dir(fusion, attack, dataset)
+    text_params = clean_text_params(dataset)
+    image_params = clean_image_params(dataset)
     if attack == "joint":
         return [sys.executable, "-m", "attacks.multimodal.joint.attack",
                 "--fusion", fusion, "--attack-scope", scope,
-                "--device", device, "--results-path", result_path]
+                "--device", device, "--output-dir", output_dir,
+                "--text-parameters", text_params, "--image-parameters", image_params,
+                "--dataset", dataset]
     optimization = "interleaved" if attack == "interleaved" else "sum"
-    return [sys.executable, "-m", "attacks.multimodal.sum.attack",
-            "--fusion", fusion, "--attack-scope", scope,
-            "--optimization", optimization, "--device", device,
-            "--output-dir", output_dir, "--results-path", result_path]
+    cmd = [sys.executable, "-m", "attacks.multimodal.sum.attack",
+           "--fusion", fusion, "--attack-scope", scope,
+           "--optimization", optimization, "--device", device,
+           "--output-dir", output_dir,
+           "--text-parameters", text_params, "--image-parameters", image_params,
+           "--dataset", dataset]
+    if fusion == "svm-rbf":
+        cmd += ["--svm-model", train_svm_model(dataset)]
+    return cmd
 
 
-def result_csv_path(attack, fusion, result_path):
-    return os.path.join(result_path, "perturbed", ATTACK_DIRS[attack],
-                        fusion, "perturbed_results.csv")
+def result_csv_path(attack, fusion, dataset):
+    return os.path.join(model_perturbed_dir(fusion, attack, dataset), "perturbed_results.csv")
 
 
-def run_sequential(jobs, result_path, device, log_to_file):
+def run_sequential(jobs, device, dataset, log_to_file):
     done, failed = 0, 0
     for attack, fusion in jobs:
         done += 1
-        cmd = build_cmd(attack, fusion, device, result_path)
+        cmd = build_cmd(attack, fusion, device, dataset)
         log_path = os.path.join(LOG_DIR, f"{attack}_{fusion}.log") if log_to_file else None
         print(f"\n{'='*70}\n[{done}/{len(jobs)}] {attack} × {fusion}  ({device})")
         print(f">>> {' '.join(cmd)}")
@@ -93,13 +94,13 @@ def run_sequential(jobs, result_path, device, log_to_file):
     return done, failed
 
 
-def gpu_worker(device, job_queue, result_path, results, lock):
+def gpu_worker(device, job_queue, dataset, results, lock):
     while True:
         item = job_queue.get()
         if item is None:
             break
         idx, total, attack, fusion = item
-        cmd = build_cmd(attack, fusion, device, result_path)
+        cmd = build_cmd(attack, fusion, device, dataset)
         log_path = os.path.join(LOG_DIR, f"{attack}_{fusion}.log")
         os.makedirs(LOG_DIR, exist_ok=True)
         with lock:
@@ -114,7 +115,7 @@ def gpu_worker(device, job_queue, result_path, results, lock):
             results.append((attack, fusion, device, rc))
 
 
-def run_parallel(jobs, result_path, devices):
+def run_parallel(jobs, devices, dataset):
     os.makedirs(LOG_DIR, exist_ok=True)
     total = len(jobs)
     print(f"\n  Parallel: {total} jobs across {len(devices)} GPU(s): {', '.join(devices)}")
@@ -132,7 +133,7 @@ def run_parallel(jobs, result_path, devices):
     results, lock, threads = [], threading.Lock(), []
     for device in devices:
         t = threading.Thread(target=gpu_worker,
-                             args=(device, job_queue, result_path, results, lock))
+                             args=(device, job_queue, dataset, results, lock))
         t.start()
         threads.append(t)
     for t in threads:
@@ -153,8 +154,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default=DATASET)
-    parser.add_argument("--devices", nargs="+", default=DEVICES, metavar="DEV",
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. Multiple = parallel.")
+    parser.add_argument("--devices", nargs="+", default=None, metavar="DEV",
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. Multiple = parallel. "
+                             "Defaults to the dataset's configured devices.")
     parser.add_argument("--fusions", nargs="+", default=FUSIONS, choices=FUSIONS, metavar="F")
     parser.add_argument("--attacks", nargs="+", default=ATTACKS, choices=ATTACKS, metavar="A")
     parser.add_argument("--force", action="store_true",
@@ -162,12 +164,13 @@ def main():
     parser.add_argument("--log", action="store_true")
     args = parser.parse_args()
 
-    result_path = f"results/{args.dataset}/classification_results"
+    if args.devices is None:
+        args.devices = dataset_devices(args.dataset)
 
     all_jobs, skipped = [], 0
     for attack in args.attacks:
         for fusion in args.fusions:
-            csv = result_csv_path(attack, fusion, result_path)
+            csv = result_csv_path(attack, fusion, args.dataset)
             if not args.force and os.path.isfile(csv):
                 skipped += 1
                 continue
@@ -193,9 +196,9 @@ def main():
 
     t0 = time.time()
     if parallel:
-        done, failed = run_parallel(all_jobs, result_path, args.devices)
+        done, failed = run_parallel(all_jobs, args.devices, args.dataset)
     else:
-        done, failed = run_sequential(all_jobs, result_path, args.devices[0], args.log)
+        done, failed = run_sequential(all_jobs, args.devices[0], args.dataset, args.log)
 
     elapsed = time.time() - t0
     print(f"\n{'='*70}")
