@@ -50,13 +50,26 @@ NEURAL_MODELS = ("text", "image", "feature-fusion")
 FUSION_HEADS = ("svm-rbf", "linear")
 MODEL_CHOICES = NEURAL_MODELS + FUSION_HEADS
 
-CHECKPOINT_NAMES = {
-    "text": "best_text_only.pt",
-    "image": "best_img_only.pt",
-    "feature-fusion": "best_feature_fusion.pt",
+CS = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+
+# Checkpoint filenames encode the backbone + LoRA hyperparameters actually used
+# for the run: <encoder>_<merge_tokens>_<lora_alpha>_<lora_r>_<lora_dropout>_<use_lora><epochs>_best<suffix>.pt
+# e.g. clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
+CHECKPOINT_SUFFIXES = {
+    "text": "_txt_only",
+    "image": "_img_only",
+    "feature-fusion": "",
 }
 
-CS = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+
+def build_checkpoint_filename(model_name, image_encoder, args):
+    encoder_name = image_encoder.split("/")[-1]
+    merge_tokens = args.merge_tokens or None
+    suffix = CHECKPOINT_SUFFIXES[model_name]
+    return (
+        f"{encoder_name}_{merge_tokens}_{args.lora_alpha}_{args.lora_r}_"
+        f"{args.lora_dropout}_{args.use_lora}{args.epochs}_best{suffix}.pt"
+    )
 
 
 # ── Dataset discovery ──
@@ -144,6 +157,7 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
         use_lora=args.use_lora, is_pythia="pythia" in args.name_llm.lower(),
         lora_alpha=args.lora_alpha, lora_r=args.lora_r,
         lora_dropout=args.lora_dropout, merge_tokens=merge_tokens,
+        device=str(device),
     )
     model.to(device)
 
@@ -161,7 +175,8 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
     criterion = nn.BCELoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    checkpoint = Path(dataset_weights_dir(args.dataset)) / CHECKPOINT_NAMES[args.model]
+    checkpoint_filename = build_checkpoint_filename(args.model, image_encoder, args)
+    checkpoint = Path(dataset_weights_dir(args.dataset)) / checkpoint_filename
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     history = {"train_loss": [], "val_loss": [], "val_accuracy": []}
     best_f1 = -1.0

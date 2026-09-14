@@ -27,7 +27,7 @@ name_img_embed: openai/clip-vit-base-patch32  # feature-fusion image encoder (sa
 # checkpoints/<dataset>/).
 dataset_configs:
   Recovery:
-    devices: [cuda:1]
+    devices: [cuda:0, cuda:1]
     device_mlm: cuda:1  # TREPAT rewriter / BERT MLM; a second GPU parallelizes text attacks
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt

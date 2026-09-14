@@ -20,6 +20,7 @@ checkpoints/
 # Local scripts
 *.sh
 !run_script.sh
+!run_train_script.sh
 
 # Local python scripts
 !utils.py
