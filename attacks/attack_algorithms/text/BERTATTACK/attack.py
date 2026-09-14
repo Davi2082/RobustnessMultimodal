@@ -25,18 +25,18 @@ class BertAttackThemisWrapper(torch.nn.Module):
         self.device = device
         self.bert_tokenizer = bert_tokenizer
 
-        # immagine fissata
+        # Fixed image for fused forward pass.
+        # Accepts a [0,1] tensor or a PIL image; normalizes to CLIP space.
         if isinstance(fixed_image, Image.Image):
             processed = processor(images=fixed_image, return_tensors="pt")
             pixel_values = processed["pixel_values"].to(device)
-            if pixel_values.dim() == 4:
-                pixel_values = pixel_values.unsqueeze(1)
-            self.fixed_images = {"pixel_values": pixel_values}
         else:
-            pixel_values = fixed_image.to(device)
-            if pixel_values.dim() == 4:
-                pixel_values = pixel_values.unsqueeze(1)
-            self.fixed_images = {"pixel_values": pixel_values}
+            mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+            std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+            pixel_values = ((fixed_image.to(device) - mean) / std)
+        if pixel_values.dim() == 4:
+            pixel_values = pixel_values.unsqueeze(1)
+        self.fixed_images = {"pixel_values": pixel_values}
 
     def forward(self, input_ids, attention_mask=None, token_type_ids=None):
         # batch di testi BERT -> stringhe

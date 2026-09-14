@@ -51,7 +51,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 import joblib
 import numpy as np
 import torch
-from PIL import Image
 from sentence_transformers import util
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -135,7 +134,6 @@ from models.fusion import (
 from scripts.utils.utils import (
     load_available_datasets,
     load_model,
-    save_perturbed_image,
     save_perturbed_texts,
     save_predictions,
 )
@@ -491,7 +489,7 @@ class LateFusionTrepatVictim:
         processor: Any,
         args: argparse.Namespace,
         device: torch.device,
-        image: Image.Image,
+        image: torch.Tensor,
     ):
         self.model = model
         self.tokenizer = tokenizer
@@ -500,9 +498,9 @@ class LateFusionTrepatVictim:
         self.device = device
         self._prob_cache: dict[str, np.ndarray] = {}
 
-        processed = processor(images=image, return_tensors="pt").to(device)
-
-        pixel_values = processed["pixel_values"]
+        mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+        std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+        pixel_values = (image.to(device) - mean) / std
 
         if pixel_values.ndim == 4:
             pixel_values = pixel_values.unsqueeze(1)
@@ -618,7 +616,7 @@ def fusion_trepat_attack(
 
         similarity = util.cos_sim(original_embedding, perturbed_embedding).item()
 
-    return ({"txt": perturbed_text, "img": news["img"]}, similarity)
+    return ({"txt": perturbed_text}, similarity)
 
 
 class TrepatStepState:
@@ -662,15 +660,16 @@ class TrepatStepState:
         self.best_target_prob: float = -1.0
         self._initialized = False
 
-    def step(self, image: Image.Image) -> tuple[dict[str, Any], float]:
+    def step(self, image: torch.Tensor) -> tuple[dict[str, Any], float]:
         """Try the next TrePAT variant; return (news_dict, similarity).
 
         Updates the victim's image so the fused score reflects the
         current adversarial image from the PGD channel.
+        ``image`` is a [0,1] tensor.
         """
-        # Update victim image for this round.
-        processed = self.victim.processor(images=image, return_tensors="pt").to(self.victim.device)
-        pixel_values = processed["pixel_values"]
+        mean = torch.tensor(self.victim.processor.image_mean, device=self.victim.device).view(1, -1, 1, 1)
+        std = torch.tensor(self.victim.processor.image_std, device=self.victim.device).view(1, -1, 1, 1)
+        pixel_values = (image.to(self.victim.device) - mean) / std
         if pixel_values.ndim == 4:
             pixel_values = pixel_values.unsqueeze(1)
         self.victim.image = pixel_values
@@ -703,7 +702,7 @@ class TrepatStepState:
 
         return self._finalize(image)
 
-    def _finalize(self, image: Image.Image) -> tuple[dict[str, Any], float]:
+    def _finalize(self, image: torch.Tensor) -> tuple[dict[str, Any], float]:
         with torch.inference_mode():
             original_emb = model_sbert.encode(
                 self.original_text, convert_to_tensor=True, device="cpu"
@@ -740,11 +739,13 @@ def encode_text_batch(
 
 
 def encode_image_batch(
-    processor: Any, images: list[Image.Image], device: torch.device
+    processor: Any, images: list[torch.Tensor], device: torch.device
 ) -> dict[str, torch.Tensor]:
-    processed = processor(images=images, return_tensors="pt").to(device)
-
-    pixel_values = processed["pixel_values"]
+    """Normalize a list of [0,1] tensors to CLIP space and stack into a batch."""
+    mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+    std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+    stacked = torch.cat(images, dim=0).to(device)
+    pixel_values = (stacked - mean) / std
 
     if pixel_values.ndim == 4:
         pixel_values = pixel_values.unsqueeze(1)
@@ -966,12 +967,19 @@ def main() -> None:
 
     attacked_samples = 0
 
+    clip_mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+    clip_std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+
     for images, labels, texts, _, indices in tqdm(
         dataloader_test, desc=f"Adversarial {args.fusion} attack", total=len(dataloader_test)
     ):
         images_device = move_to_device(images, device)
 
         texts_device = move_to_device(texts, device)
+
+        # Recover [0,1] pixel tensors from the CLIP-normalized batch
+        batch_pixels = images_device["pixel_values"].squeeze(1)
+        batch_raw = batch_pixels * clip_std + clip_mean
 
         with torch.inference_mode():
             clean_scores, _ = model(images_device, texts_device)
@@ -982,7 +990,7 @@ def main() -> None:
 
         perturbed_texts: list[str] = []
 
-        perturbed_images: list[Image.Image] = []
+        perturbed_images: list[torch.Tensor] = []
 
         for position, label in tqdm(
             enumerate(labels.tolist()),
@@ -992,15 +1000,15 @@ def main() -> None:
         ):
             index = int(indices[position].item())
 
+            sample_raw = batch_raw[position].unsqueeze(0)
+
             clean_news = {
                 "txt": dataset_test.texts[index],
-                "img": Image.open(
-                    os.path.join(dataset_test.img_dir, dataset_test.imgs_path[index])
-                ).convert("RGB"),
+                "img": sample_raw,
             }
 
             perturbed_text = clean_news["txt"]
-            perturbed_image = clean_news["img"]
+            perturbed_image = sample_raw
             text_similarity = 1.0
             image_ssim = 1.0
 
@@ -1106,7 +1114,7 @@ def main() -> None:
                         current_news = {"txt": perturbed_text, "img": current_news["img"]}
 
                     if image_step and args.attack_scope in {"image", "both"}:
-                        image_news, image_ssim, round_clean_pixels = img_perturbation(
+                        perturbed_image, image_ssim, round_clean_pixels = img_perturbation(
                             model,
                             tokenizer,
                             processor,
@@ -1114,24 +1122,17 @@ def main() -> None:
                             current_news,
                             torch.tensor([label], device=device),
                             steps=(None if args.optimization == "sum" else 1),
-                            # Randomise only the first step; later ones must
-                            # continue from the image already perturbed.
                             random_start=(args.optimization == "sum" or step == 0),
+                            pixel_values=current_news["img"],
                         )
-
-                        perturbed_image = image_news["img"]
 
                         image_ssim = float(
                             image_ssim.item() if hasattr(image_ssim, "item") else image_ssim
                         )
 
-                        save_perturbed_image(str(dump_dir / "images"), index, perturbed_image)
-
                         if clean_pixels is None:
                             clean_pixels = round_clean_pixels
 
-                        # Keep every round inside the epsilon-ball of the
-                        # original image, not of the previous round's output.
                         if args.optimization != "sum":
                             perturbed_image = project_to_epsilon_ball(
                                 perturbed_image, clean_pixels, args.epsilon

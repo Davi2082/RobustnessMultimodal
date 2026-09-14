@@ -21,7 +21,6 @@ from typing import Any
 
 import numpy as np
 import torch
-from PIL import Image
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -68,7 +67,6 @@ from configuration_files.paths import (
 from scripts.utils.utils import (
     load_available_datasets,
     load_model,
-    save_perturbed_image,
     save_perturbed_texts,
     save_predictions,
 )
@@ -97,13 +95,6 @@ def normalise(pixels: torch.Tensor, processor) -> torch.Tensor:
     return (pixels - mean) / std
 
 
-def to_pil(pixels: torch.Tensor) -> Image.Image:
-    array = (
-        pixels.squeeze(0).permute(1, 2, 0).detach().cpu().clamp(0, 1).numpy() * 255
-    ).astype(np.uint8)
-    return Image.fromarray(array)
-
-
 def joint_attack(
     model,
     tokenizer,
@@ -114,6 +105,7 @@ def joint_attack(
     embedding_table: torch.Tensor,
     allowed_candidates: torch.Tensor,
     label: int,
+    pixel_values: torch.Tensor | None = None,
 ) -> dict[str, Any]:
     """Run the shared-gradient attack on one sample.
 
@@ -151,8 +143,11 @@ def joint_attack(
     n_attackable = int(attackable.sum().item())
     max_flips = max(1, int(args.max_change_ratio * n_attackable))
 
-    processed = processor(images=news["img"], return_tensors="pt", do_normalize=False)
-    clean_pixels = processed["pixel_values"].to(device)
+    if pixel_values is not None:
+        clean_pixels = pixel_values.to(device)
+    else:
+        processed = processor(images=news["img"], return_tensors="pt", do_normalize=False)
+        clean_pixels = processed["pixel_values"].to(device)
 
     delta = torch.zeros_like(clean_pixels)
     if attack_image and args.random_start:
@@ -286,9 +281,9 @@ def joint_attack(
         else news["txt"]
     )
     perturbed_image = (
-        to_pil((clean_pixels + perturbed_delta).clamp(0, 1))
+        (clean_pixels + perturbed_delta).clamp(0, 1)
         if attack_image
-        else news["img"]
+        else pixel_values if pixel_values is not None else news["img"]
     )
 
     similarity = 1.0
@@ -496,6 +491,9 @@ def main() -> None:
     similarities, flips_list, perturbed_text_rows = [], [], []
     attacked = 0
 
+    clip_mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+    clip_std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+
     print(f"Budget: {args.iters} iterations, alpha={args.alpha:.5f}")
 
     for images, labels, texts, _, indices in tqdm(
@@ -503,6 +501,9 @@ def main() -> None:
     ):
         images_device = move_to_device(images, device)
         texts_device = move_to_device(texts, device)
+
+        batch_pixels = images_device["pixel_values"].squeeze(1)
+        batch_raw = batch_pixels * clip_std + clip_mean
 
         with torch.inference_mode():
             clean_scores, _ = model(images_device, texts_device)
@@ -514,14 +515,13 @@ def main() -> None:
 
         for position, label in enumerate(labels.tolist()):
             index = int(indices[position].item())
+            sample_raw = batch_raw[position].unsqueeze(0)
             clean_news = {
                 "txt": dataset_test.texts[index],
-                "img": Image.open(
-                    os.path.join(dataset_test.img_dir, dataset_test.imgs_path[index])
-                ).convert("RGB"),
+                "img": sample_raw,
             }
             perturbed_text = clean_news["txt"]
-            perturbed_image = clean_news["img"]
+            perturbed_image = sample_raw
             similarity, n_flips = 1.0, 0
 
             clean_is_source = (
@@ -539,6 +539,7 @@ def main() -> None:
                     embedding_table,
                     allowed,
                     label,
+                    pixel_values=sample_raw,
                 )
                 perturbed_text = result["txt"]
                 perturbed_image = result["img"]
@@ -552,10 +553,6 @@ def main() -> None:
                             "original": clean_news["txt"],
                             "perturbed": perturbed_text,
                         }
-                    )
-                if args.attack_scope in {"image", "both"}:
-                    save_perturbed_image(
-                        str(dump_dir / "images"), index, perturbed_image
                     )
 
             perturbed_texts.append(perturbed_text)

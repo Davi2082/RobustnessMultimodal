@@ -5,11 +5,8 @@ returns the perturbed sample. It knows nothing about fusion, datasets or
 result files.
 """
 
-import numpy as np
 import torch
 import torchattacks
-import torchvision.transforms as T
-from PIL import Image
 from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 
@@ -51,12 +48,16 @@ class WrappedModel(torch.nn.Module):
 
 
 def img_perturbation(model, tokenizer, processor, args, news, label,
-                     steps=None, random_start=True):
+                     steps=None, random_start=True, pixel_values=None):
     """PGD on the image channel.
 
     ``steps``/``random_start`` let the attack be advanced one iteration at a
     time from an already perturbed image. The step size always follows the
     configured budget, so stepping does not change how far an iteration moves.
+
+    ``pixel_values`` is an optional [0,1] tensor (before CLIP normalization).
+    When provided, the PIL image in ``news["img"]`` is not re-processed,
+    avoiding a redundant Image.open + processor call.
     """
     device = label.device
     # Text tokenization for fixed text
@@ -68,9 +69,12 @@ def img_perturbation(model, tokenizer, processor, args, news, label,
         return_attention_mask=False,
         max_length=args.n_tokens,
     )
-    # Image processing for clean image
-    process_img = processor(images=news["img"], return_tensors="pt", do_normalize=False)
-    process_img = {k: v.to(device) for k, v in process_img.items()}
+    # Image: use pre-computed [0,1] tensor if available, otherwise process PIL
+    if pixel_values is not None:
+        process_img = {"pixel_values": pixel_values.to(device)}
+    else:
+        process_img = processor(images=news["img"], return_tensors="pt", do_normalize=False)
+        process_img = {k: v.to(device) for k, v in process_img.items()}
 
     # PGD Attack
     wrapped_model = WrappedModel(model, token_txt, processor)
@@ -84,37 +88,19 @@ def img_perturbation(model, tokenizer, processor, args, news, label,
     )
     corr_img = attack(process_img["pixel_values"], label)
 
-    # Compute SSIM before converting back to PIL
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
     ssim_val = ssim(preds=corr_img.float(), target=process_img["pixel_values"].float())
 
-    # Convert perturbed tensor back to PIL Image so downstream processor can handle it uniformly
-    arr = (corr_img.squeeze(0).permute(1, 2, 0).detach().cpu().clamp(0, 1).numpy() * 255).astype(np.uint8)
-    corr_news = {"txt": news["txt"], "img": Image.fromarray(arr)}
-
-    return corr_news, ssim_val, process_img["pixel_values"]
+    return corr_img.detach(), ssim_val, process_img["pixel_values"]
 
 
-def project_to_epsilon_ball(perturbed_img, clean_pixels, epsilon):
-    """Clip a perturbed image back into the L-inf ball of the clean image.
-
-    Stepping restarts PGD from the previous adversarial image, which would let
-    the perturbation drift past epsilon. ``clean_pixels`` is in [0, 1].
-    """
-    to_tensor = T.ToTensor()
-    perturbed = to_tensor(perturbed_img).unsqueeze(0).to(clean_pixels.device)
-
+def project_to_epsilon_ball(perturbed, clean_pixels, epsilon):
+    """Clip a perturbed [0,1] tensor into the L-inf ball of clean_pixels."""
     if perturbed.shape != clean_pixels.shape:
         raise ValueError(
             f"Cannot project {tuple(perturbed.shape)} onto "
             f"{tuple(clean_pixels.shape)}"
         )
-
-    projected = torch.clamp(
+    return torch.clamp(
         perturbed, clean_pixels - epsilon, clean_pixels + epsilon
     ).clamp(0, 1)
-
-    array = (
-        projected.squeeze(0).permute(1, 2, 0).detach().cpu().numpy() * 255
-    ).astype(np.uint8)
-    return Image.fromarray(array)

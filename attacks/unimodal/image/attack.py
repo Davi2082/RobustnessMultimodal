@@ -3,24 +3,19 @@ import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import torch
-import torchattacks
 import json
 import glob
 import argparse
 
 from torch.utils.data import DataLoader
-from PIL import Image
 from tqdm import tqdm
 
 # Custom imports
 from attacks.attack_algorithms.img.PGD.pgd import img_perturbation
-from attacks.attack_algorithms.text.BERTATTACK.attack import bertattack
 from scripts.utils.utils import (
     load_model,
-    use_model,
     load_available_datasets,
     save_predictions,
-    save_perturbed_image,
 )
 from configuration_files.configuration import (
     SOURCE_LABEL,
@@ -31,7 +26,7 @@ from configuration_files.configuration import (
     SUBSET_SIZE,
     dataset_devices,
 )
-from configuration_files.paths import CLEAN_IMAGE_PARAMS, DATA_PERTURBED_IMAGE, model_perturbed_dir
+from configuration_files.paths import CLEAN_IMAGE_PARAMS, model_perturbed_dir
 from data_loading import my_datasets
 
 # Main evaluation function
@@ -112,50 +107,49 @@ def main():
     logits_list = [] # Logits [-inf, +inf]
     scores_list = [] # Scores [0, 1]
 
+    # Denormalization constants — undo CLIP normalization to get [0,1] tensors
+    clip_mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
+    clip_std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
+
     for images, labels, texts, imgs_path, indices in tqdm(dataloader_test, desc="Evaluating", total=len(dataloader_test)):
         images = images.to(device)
         texts = texts.to(device)
 
-        imgs_per_list = [] # Perturbed images
-        
-        # Challenging the model
+        # Recover [0,1] pixel tensors from the normalized batch
+        pixel_values = images["pixel_values"].squeeze(1)
+        raw_pixels = pixel_values * clip_std + clip_mean
+
+        perturbed_pixels = []
+
         for i, label in tqdm(enumerate(labels.tolist()), desc="Challenging the model", total=len(labels), leave=False):
-            # Clean news
             news = {
                 "txt": dataset_test.texts[indices[i].item()],
-                "img": Image.open(os.path.join(dataset_test.img_dir, dataset_test.imgs_path[indices[i].item()])).convert("RGB"),
+                "img": None,
             }
-            # Untargeted by default: attack whatever the model gets right,
-            # pushing each sample toward the class opposite to its own.
+            sample_raw = raw_pixels[i].unsqueeze(0)
+
             if args.targeted:
                 should_attack = label == args.source_label
-                source_label, target_label = args.source_label, args.target_label
             else:
                 should_attack = True
-                source_label, target_label = label, 1 - label
 
             if should_attack:
-                # Image perturbation
-                news_img_per, ssim_pgd, proccess_img = img_perturbation(model, tokenizer, processor, args, news, torch.tensor([label], device=device))
-                img_per = news_img_per["img"]
-                # Dump the perturbed image for qualitative analysis
-                save_perturbed_image(os.path.join(DATA_PERTURBED_IMAGE, "images"), indices[i].item(), img_per)
+                per_tensor, ssim_pgd, _ = img_perturbation(
+                    model, tokenizer, processor, args, news,
+                    torch.tensor([label], device=device),
+                    pixel_values=sample_raw,
+                )
             else:
-                img_per = news["img"]
-                ssim_pgd = 1.0
-            imgs_per_list.append(img_per)
+                per_tensor = sample_raw
 
-        # Processing of multimodal corrupted images
-        imgs_per_list = processor(images=imgs_per_list, return_tensors="pt", do_normalize=False).to(device)
-        mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
-        std = torch.tensor(processor.image_std, device=device).view(1, -1, 1, 1)
-        imgs_per_list = {"pixel_values": ((imgs_per_list["pixel_values"] - mean) / std)}
-        imgs_per_list["pixel_values"] = imgs_per_list["pixel_values"].unsqueeze(1)
-        imgs_per = {k: v.to(device) for k, v in imgs_per_list.items()}
+            perturbed_pixels.append(per_tensor)
 
-        # Get predictions on corrupted samples in batch
+        # Stack perturbed batch and normalize for model forward
+        per_batch = torch.cat(perturbed_pixels, dim=0)
+        per_normalized = (per_batch - clip_mean) / clip_std
+        imgs_per = {"pixel_values": per_normalized.unsqueeze(1)}
+
         with torch.no_grad():
-            # Evaluation with perturbed samples in every channel
             batch_scores, batch_logits = model(imgs_per, None)
             logits_list.append(batch_logits.detach().cpu())
             scores_list.append(batch_scores.detach().cpu())
