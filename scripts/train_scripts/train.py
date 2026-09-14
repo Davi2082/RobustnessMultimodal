@@ -147,6 +147,12 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
     )
     model.to(device)
 
+    if len(args.devices) > 1:
+        device_ids = [torch.device(d) for d in args.devices]
+        gpu_ids = [d.index for d in device_ids]
+        model = nn.DataParallel(model, device_ids=gpu_ids, output_device=gpu_ids[0])
+        print(f"  DataParallel across GPUs: {gpu_ids}")
+
     train_dataset = my_datasets.get_dataset(dataset_class, annotation_loader, args.n_tokens, processor, tokenizer, str(train_file), str(image_dir))
     val_dataset = my_datasets.get_dataset(dataset_class, annotation_loader, args.n_tokens, processor, tokenizer, str(val_file), str(image_dir))
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers)
@@ -181,7 +187,8 @@ def train_neural(args, dataset_class, annotation_loader, train_file, val_file, i
         print(f"Epoch {epoch + 1}: train loss={train_loss:.4f}, val loss={metrics['loss']:.4f}, F1={metrics['f1']:.4f}")
         if metrics["f1"] > best_f1:
             best_f1 = metrics["f1"]
-            torch.save(model.state_dict(), checkpoint)
+            raw_model = model.module if isinstance(model, nn.DataParallel) else model
+            torch.save(raw_model.state_dict(), checkpoint)
             metadata = {
                 "name_llm": args.name_llm, "name_img_embed": image_encoder,
                 "merge_tokens": args.merge_tokens, "lora_alpha": args.lora_alpha,
@@ -411,7 +418,7 @@ def main():
 
     print("Training configuration")
     print(f"  Dataset: {args.dataset}")
-    print(f"  Device:  {args.devices[0]}")
+    print(f"  Device:  {', '.join(args.devices)}")
 
     if args.train_all:
         for model_name in MODEL_CHOICES:
