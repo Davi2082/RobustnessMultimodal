@@ -1,0 +1,7 @@
+method,condition,AUC,F1,Acc,dAUC,dF1,dAcc
+feature-fusion (blank),both,0.765,0.37,0.88,,,
+feature-fusion (blank),image_only,0.765,0.357,0.873,-0.0,-0.013,-0.007
+feature-fusion (blank),text_only,0.572,0.286,0.664,-0.193,-0.085,-0.216
+feature-fusion (drop),both,0.765,0.37,0.88,,,
+feature-fusion (drop),image_only,0.76,0.327,0.883,-0.005,-0.044,0.004
+feature-fusion (drop),text_only,0.495,0.144,0.707,-0.27,-0.226,-0.173

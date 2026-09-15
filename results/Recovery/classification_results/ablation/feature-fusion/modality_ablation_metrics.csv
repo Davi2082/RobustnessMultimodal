@@ -1,7 +1,0 @@
-method,condition,AUC,F1,Acc,dAUC,dF1,dAcc
-feature-fusion (blank),both,1.0,1.0,1.0,,,
-feature-fusion (blank),image_only,1.0,0.0,0.5,0.0,-1.0,-0.5
-feature-fusion (blank),text_only,0.0,0.0,0.0,-1.0,-1.0,-1.0
-feature-fusion (drop),both,1.0,1.0,1.0,,,
-feature-fusion (drop),image_only,1.0,0.0,0.5,0.0,-1.0,-0.5
-feature-fusion (drop),text_only,0.0,0.667,0.5,-1.0,-0.333,-0.5

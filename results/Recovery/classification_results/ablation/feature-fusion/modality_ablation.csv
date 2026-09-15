@@ -1,3 +1,0 @@
-index,label,blank_logit_both,blank_logit_img_only,blank_logit_txt_only,drop_logit_both,drop_logit_img_only,drop_logit_txt_only,blank_score_both,blank_score_img_only,blank_score_txt_only,drop_score_both,drop_score_img_only,drop_score_txt_only
-0,1,9.751755,6.6418686,-0.10687202,9.751755,4.8313026,-0.3239801,0.9999418,0.9986971,0.4733074,0.9999418,0.99208695,0.41970608
-1,0,-8.731763,3.8737347,0.5330442,-8.731763,1.8659496,-0.13411443,0.00016135168,0.97964245,0.6301929,0.00016135168,0.86598897,0.46652156
