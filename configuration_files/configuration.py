@@ -24,6 +24,12 @@ def _number(value):
 
 RAND_SEED = _CFG["rand_seed"]
 
+# Pipeline stage toggles (0/1 in config.yaml)
+TRAIN_PIPELINE = bool(_CFG.get("train_pipeline", 0))
+CLEAN_PIPELINE = bool(_CFG.get("clean_pipeline", 1))
+ABLATION_PIPELINE = bool(_CFG.get("ablation_pipeline", 0))
+ADVERSARIAL_PIPELINE = bool(_CFG.get("adversarial_pipeline", 0))
+
 # Dataset selection
 DATASETS = _CFG["datasets"]  # datasets available for full-pipeline sweeps
 DATASET = DATASETS[0]  # active dataset for scripts without their own --dataset override
@@ -91,13 +97,29 @@ TEXT_WEIGHTS_PATH = text_weights_path()
 IMAGE_WEIGHTS_PATH = image_weights_path()
 FF_WEIGHTS_PATH = ff_weights_path()
 
+# Training parameters
+EPOCHS = _CFG["epochs"]
+LEARNING_RATE = _CFG["learning_rate"]
+LORA_ALPHA = _CFG["lora_alpha"]
+LORA_R = _CFG["lora_r"]
+LORA_DROPOUT = _CFG["lora_dropout"]
+USE_LORA = _CFG["use_lora"]
+MERGE_TOKENS = _CFG["merge_tokens"]
+NUM_WORKERS = _CFG["num_workers"]
+
 # Model parameters
 BATCH_SIZE = _CFG["batch_size"]
 N_TOKENS = _CFG["n_tokens"]
 THRESHOLD = _CFG["threshold"]
 
-# Testing — restrict clean eval + attacks to the first N samples (None = full dataset)
-SUBSET_SIZE = _CFG["subset_size"]
+# Per-dataset subset settings (None = full dataset)
+def dataset_subset_size(dataset=None):
+    return dataset_config(dataset).get("subset_size", None)
+
+def dataset_balanced_subset(dataset=None):
+    return dataset_config(dataset).get("balanced_subset", False)
+
+SUBSET_SIZE = dataset_subset_size()
 
 # Attack parameters
 SOURCE_LABEL = _CFG["source_label"]  # Fake
@@ -145,6 +167,33 @@ LATE_FUSION_BUDGET_DIVISOR = _CFG["late_fusion_budget_divisor"]
 
 
 # The RBF-SVM is fitted on clean text/image predictions from the training set.
+def build_subset_sampler(dataset, subset_size, balanced=None):
+    """Return a list of indices for a balanced or sequential subset.
+
+    ``balanced`` defaults to the active dataset's ``balanced_subset`` setting.
+    """
+    import numpy as np
+    if subset_size is None:
+        return None
+    if balanced is None:
+        balanced = dataset_balanced_subset()
+    n = min(subset_size, len(dataset))
+    if not balanced:
+        return list(range(n))
+    try:
+        labels = dataset.img_labels.iloc[:, 1].values
+    except AttributeError:
+        return list(range(n))
+    rng = np.random.RandomState(RAND_SEED)
+    per_class = n // 2
+    idx_0 = np.where(labels == 0)[0]
+    idx_1 = np.where(labels == 1)[0]
+    pick_0 = rng.choice(idx_0, size=min(per_class, len(idx_0)), replace=False)
+    pick_1 = rng.choice(idx_1, size=min(per_class, len(idx_1)), replace=False)
+    sampler = sorted(np.concatenate([pick_0, pick_1]).tolist())
+    return sampler
+
+
 LATE_FUSION_INPUT = _CFG["late_fusion_input"]
 LATE_FUSION_SVM_C = _CFG["late_fusion_svm_c"]
 LATE_FUSION_SVM_GAMMA = _CFG["late_fusion_svm_gamma"]

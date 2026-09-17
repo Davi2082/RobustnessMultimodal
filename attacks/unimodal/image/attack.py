@@ -23,7 +23,9 @@ from configuration_files.configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
-    SUBSET_SIZE,
+    build_subset_sampler,
+    dataset_balanced_subset,
+    dataset_subset_size,
     dataset_devices,
 )
 from configuration_files.paths import CLEAN_IMAGE_PARAMS, model_perturbed_dir
@@ -94,9 +96,8 @@ def main():
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation (optionally restricted to the first N samples for quick tests)
-    if SUBSET_SIZE is not None:
-        sampler = list(range(min(SUBSET_SIZE, len(dataset_test))))
+    sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    if sampler is not None:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)

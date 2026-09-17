@@ -42,7 +42,7 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 from data_loading import my_datasets
 from scripts.utils.utils import load_available_datasets, load_model
 from configuration_files.configuration import (
-    NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DATASET, SUBSET_SIZE, dataset_devices,
+    NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DATASET, build_subset_sampler, dataset_balanced_subset, dataset_devices, dataset_subset_size,
 )
 from configuration_files.paths import dataset_annotations, dataset_images_dir
 from scripts.utils.devices import resolve_devices
@@ -149,9 +149,9 @@ def main():
         dataset_annotations(args.dataset, "test"),
         dataset_images_dir(args.dataset),
     )
-    if SUBSET_SIZE is not None:
-        loader = DataLoader(dataset_test, batch_size=args.batch_size,
-                            sampler=list(range(min(SUBSET_SIZE, len(dataset_test)))))
+    sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    if sampler is not None:
+        loader = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:
         loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
 

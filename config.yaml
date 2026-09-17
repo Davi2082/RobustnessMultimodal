@@ -1,27 +1,28 @@
 # Tunable settings for the RobustnessMultimodal pipeline.
-# configuration_files/configuration.py loads this file.
+# configuration_files/configuration.py loads this file, some parameters
+# can be overridden in each used script, but unless specified all parameters
+# are taken from this file.
 
+# Pipeline parameters - run_scripts.sh
 rand_seed: 42
 
-# Datasets available for the pipeline. The first entry is the active dataset
-# for scripts without their own --dataset override; the rest are available
-# for full-pipeline sweeps.
+train_pipeline: 0
+clean_pipeline: 1
+ablation_pipeline: 0
+adversarial_pipeline: 0
 
 datasets:
-  # - Fakeddit
-  - Recovery
-
-# Full-pipeline sweep membership — run_clean.py, run_multimodal_attacks.py
-# and run_scripts.sh all read these instead of keeping their own copies.
-# pipeline_late_fusion_modes: [min, mean, max, svm-rbf, linear]
-# pipeline_attacks: [pgd, trepat, sum, interleaved, joint]
-
-pipeline_late_fusion_modes: [min, mean, max]
-pipeline_attacks: [pgd, trepat, sum]
+  - Fakeddit
+  # - Recovery
+pipeline_late_fusion_modes: [min, mean, max] # Full list: [min, mean, max, svm-rbf, linear]
+pipeline_attacks: [pgd, trepat, sum] # Full list: [pgd, trepat, sum, interleaved, joint]
 
 # Models
 name_llm: TinyLlama/TinyLlama-1.1B-Chat-v1.0
-name_img_embed: openai/clip-vit-base-patch32  # feature-fusion image encoder (same for every dataset)
+name_img_embed: openai/clip-vit-base-patch32
+batch_size: 128
+n_tokens: 256
+threshold: 0.5
 
 # Per-dataset settings: CUDA devices + checkpoint filenames (relative to
 # checkpoints/<dataset>/).
@@ -29,25 +30,36 @@ dataset_configs:
   Recovery:
     devices: [cuda:0, cuda:1]
     device_mlm: cuda:1  # TREPAT rewriter / BERT MLM; a second GPU parallelizes text attacks
+    subset_size: null   # null = full dataset (283 test samples)
+    balanced_subset: false
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
   Fakeddit:
     devices: [cuda:1]
     device_mlm: cuda:1
+    subset_size: 200    # balanced across classes when balanced_subset is true
+    balanced_subset: true
     text_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
 
-# Model parameters
-batch_size: 128
-n_tokens: 256
-threshold: 0.5
+# Training parameters
+## Themis model
+epochs: 10
+learning_rate: 1e-4
+lora_alpha: 8
+lora_r: 8
+lora_dropout: 0.4
+use_lora: true
+merge_tokens: 0
+num_workers: 0
+# The RBF-SVM
+late_fusion_input: scores
+late_fusion_svm_c: 1.0
+late_fusion_svm_gamma: scale
 
-# Testing — restrict clean eval + attacks to the first N samples (null = full dataset)
-subset_size: 2  # 10 for testing adv
-
-# Attack parameters
+# Attack parameters (for targetted attacks)
 source_label: 0  # Fake
 target_label: 1  # Real
 
@@ -89,8 +101,3 @@ alternation_rounds: 1  # Rounds of interleaved image-PGD + text-BERTAttack (1 = 
 # independently attacked modality.
 late_fusion_attack_scopes: [image, text, both]
 late_fusion_budget_divisor: 2
-
-# The RBF-SVM is fitted on clean text/image predictions from the training set.
-late_fusion_input: scores
-late_fusion_svm_c: 1.0
-late_fusion_svm_gamma: scale

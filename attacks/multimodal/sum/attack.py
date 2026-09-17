@@ -78,7 +78,9 @@ from configuration_files.configuration import (
     LATE_FUSION_BUDGET_DIVISOR,
     MAX_VARIANTS,
     PGD_ITERS,
-    SUBSET_SIZE,
+    build_subset_sampler,
+    dataset_balanced_subset,
+    dataset_subset_size,
     TARGET_LABEL,
     THRESHOLD_PRED_SCORE,
 )
@@ -243,7 +245,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
         default=int(text_parameters["Number of Tokens"]),
     )
     data_group.add_argument(
-        "--subset-size", "--subset_size", dest="subset_size", type=int, default=SUBSET_SIZE
+        "--subset-size", "--subset_size", dest="subset_size", type=int, default=None
     )
     data_group.add_argument(
         "--num-workers", "--num_workers", dest="num_workers", type=int, default=0
@@ -424,6 +426,8 @@ def validate_args(
     if args.n_tokens <= 0:
         raise ValueError("--n-tokens must be positive")
 
+    if args.subset_size is None:
+        args.subset_size = dataset_subset_size(args.dataset)
     if args.subset_size is not None and args.subset_size <= 0:
         raise ValueError("--subset-size must be positive")
 
@@ -916,7 +920,7 @@ def main() -> None:
     sampler = None
 
     if args.subset_size is not None:
-        sampler = list(range(min(args.subset_size, len(dataset_test))))
+        sampler = build_subset_sampler(dataset_test, args.subset_size, dataset_balanced_subset(args.dataset))
 
     dataloader_test = DataLoader(
         dataset_test,

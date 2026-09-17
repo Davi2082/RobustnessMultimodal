@@ -52,7 +52,9 @@ from configuration_files.configuration import (
     MIN_TXT_SIMILARITY,
     PGD_ITERS,
     SOURCE_LABEL,
-    SUBSET_SIZE,
+    build_subset_sampler,
+    dataset_balanced_subset,
+    dataset_subset_size,
     TARGET_LABEL,
     THRESHOLD,
 )
@@ -370,7 +372,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     parser.add_argument("--threshold", type=float, default=THRESHOLD)
     parser.add_argument("--source-label", type=int, default=SOURCE_LABEL)
     parser.add_argument("--target-label", type=int, default=TARGET_LABEL)
-    parser.add_argument("--subset-size", type=int, default=SUBSET_SIZE)
+    parser.add_argument("--subset-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", default=DEVICES[0])
@@ -384,6 +386,8 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
 
     if args.dataset is None:
         args.dataset = text_parameters["Dataset"]
+    if args.subset_size is None:
+        args.subset_size = dataset_subset_size(args.dataset)
     args.n_tokens = int(text_parameters["Number of Tokens"])
     args.text_model_path = Path(text_parameters["Model Path"])
     args.image_model_path = Path(image_parameters["Model Path"])
@@ -468,7 +472,7 @@ def main() -> None:
     )
 
     sampler = (
-        list(range(min(args.subset_size, len(dataset_test))))
+        build_subset_sampler(dataset_test, args.subset_size, dataset_balanced_subset(args.dataset))
         if args.subset_size is not None
         else None
     )

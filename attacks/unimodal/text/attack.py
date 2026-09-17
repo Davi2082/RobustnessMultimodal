@@ -37,7 +37,9 @@ from configuration_files.configuration import (
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
     MIN_TXT_SIMILARITY,
-    SUBSET_SIZE,
+    build_subset_sampler,
+    dataset_balanced_subset,
+    dataset_subset_size,
     dataset_device_mlm,
     dataset_devices,
 )
@@ -136,9 +138,9 @@ def main():
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation (optionally restricted to the first N samples for quick tests)
-    if SUBSET_SIZE is not None:
-        sampler = list(range(min(SUBSET_SIZE, len(dataset_test))))
+    # Dataloader creation (optionally restricted to a balanced subset)
+    sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    if sampler is not None:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False)
