@@ -54,7 +54,7 @@ Toggle which stages run by setting `train_pipeline`, `clean_pipeline`, `ablation
 2. **Missing-modality ablation** — feature-fusion and late-fusion (metrics computed inline)
 3. **Adversarial attacks** — all attack types against all fusion methods, followed by metrics
 
-Results are written to `results/<dataset>/<model>/{clean,ablation,perturbed/<attack>}/`.
+Results are written to `results/<dataset>/<subset_size>/<seed>/{clean,ablation,perturbed}/<model>/`.
 
 ---
 
@@ -140,17 +140,18 @@ Training parameters (epochs, learning rate, LoRA settings) are configured in `co
 ## Result directory structure
 
 ```
-results/<Dataset>/
-├── <model>/
-│   ├── clean/
-│   │   ├── results.csv
-│   │   └── parameters.json
-│   ├── ablation/
-│   │   └── modality_ablation_metrics.csv
-│   └── perturbed/<attack>/
-│       ├── perturbed_results.csv
-│       └── parameters.json
+results/<Dataset>/<subset_size>/<seed>/
+├── clean/<model>/
+│   ├── results.csv
+│   └── parameters.json
+├── ablation/<model>/
+│   └── modality_ablation_metrics.csv
+└── perturbed/<attack>/<model>/
+    ├── perturbed_results.csv
+    └── parameters.json
 ```
+
+`<subset_size>` is `full` when no subset is used, or the integer count (e.g. `200`). `<seed>` is the random seed from config.yaml (e.g. `42`).
 
 ---
 

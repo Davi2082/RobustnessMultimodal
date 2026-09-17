@@ -1,5 +1,5 @@
 import os
-from configuration_files.configuration import DATASET
+from configuration_files.configuration import DATASET, RAND_SEED, dataset_subset_size
 
 CONFIG_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CONFIG_DIR)
@@ -11,30 +11,33 @@ def dataset_weights_dir(dataset=None):
 
 
 # ---------------------------------------------------------------------------
-# New result layout:
-#   results/<dataset>/<model_or_fusion>/clean/
-#   results/<dataset>/<model_or_fusion>/perturbed/<attack>/
-#   results/<dataset>/<model_or_fusion>/feature_ablation/
+# Result layout:
+#   results/<dataset>/<subset_size>/<seed>/clean/<model_or_fusion>/
+#   results/<dataset>/<subset_size>/<seed>/perturbed/<model_or_fusion>/<attack>/
+#   results/<dataset>/<subset_size>/<seed>/ablation/<model_or_fusion>/
 # ---------------------------------------------------------------------------
 
 def dataset_result_root(dataset=None):
-    """Top-level results directory for a dataset."""
-    return f"results/{dataset or DATASET}"
+    """Top-level results directory for a dataset run."""
+    ds = dataset or DATASET
+    subset = dataset_subset_size(ds)
+    subset_str = "full" if subset is None else str(subset)
+    return os.path.join("results", ds, subset_str, str(RAND_SEED))
 
 
 def model_clean_dir(model_or_fusion, dataset=None):
-    """results/<dataset>/<model_or_fusion>/clean/"""
-    return os.path.join(dataset_result_root(dataset), model_or_fusion, "clean")
+    """results/<dataset>/<subset>/<seed>/clean/<model_or_fusion>/"""
+    return os.path.join(dataset_result_root(dataset), "clean", model_or_fusion)
 
 
 def model_perturbed_dir(model_or_fusion, attack, dataset=None):
-    """results/<dataset>/<model_or_fusion>/perturbed/<attack>/"""
-    return os.path.join(dataset_result_root(dataset), model_or_fusion, "perturbed", attack)
+    """results/<dataset>/<subset>/<seed>/perturbed/<attack>/<model_or_fusion>/"""
+    return os.path.join(dataset_result_root(dataset), "perturbed", attack, model_or_fusion)
 
 
 def model_ablation_dir(model_or_fusion, dataset=None):
-    """results/<dataset>/<model_or_fusion>/feature_ablation/"""
-    return os.path.join(dataset_result_root(dataset), model_or_fusion, "feature_ablation")
+    """results/<dataset>/<subset>/<seed>/ablation/<model_or_fusion>/"""
+    return os.path.join(dataset_result_root(dataset), "ablation", model_or_fusion)
 
 
 def clean_text_params(dataset=None):
@@ -49,28 +52,12 @@ def clean_ff_params(dataset=None):
     return os.path.join(model_clean_dir("feature-fusion", dataset), "parameters.json")
 
 
-def dataset_train_base(dataset=None):
-    return f"results/{dataset or DATASET}/train"
-
-
-def train_svm_model(dataset=None):
-    return os.path.join(dataset_train_base(dataset), "svm_rbf.joblib")
-
-
 # Convenience constants for the active DATASET
 DATASET_WEIGHTS_DIR = dataset_weights_dir()
 RESULT_PATH = dataset_result_root()  # backward compat for plot scripts
 CLEAN_TEXT_PARAMS = clean_text_params()
 CLEAN_IMAGE_PARAMS = clean_image_params()
 CLEAN_FF_PARAMS = clean_ff_params()
-
-# Training data
-TRAIN_BASE = dataset_train_base()
-TRAIN_TEXT_CSV = os.path.join(TRAIN_BASE, "text", "results.csv")
-TRAIN_IMAGE_CSV = os.path.join(TRAIN_BASE, "image", "results.csv")
-TRAIN_SVM_MODEL = train_svm_model()
-TRAIN_DATA_CSV = f"data/{DATASET}/train_augmented.csv"
-TRAIN_IMAGES_DIR = f"data/{DATASET}/images"
 
 # Perturbed sample dumps (generated images + texts), grouped per dataset
 def dataset_perturbed_base(dataset=None):

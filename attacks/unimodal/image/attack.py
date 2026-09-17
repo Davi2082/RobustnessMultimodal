@@ -23,6 +23,7 @@ from configuration_files.configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
+    RAND_SEED,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -33,6 +34,8 @@ from data_loading import my_datasets
 
 # Main evaluation function
 def main():
+    import time as _time
+    _t0 = _time.time()
     dataset_classes, load_functions = load_available_datasets()
     # "Parameters" contains information about the model that would be attacked
     parameter_parser = argparse.ArgumentParser(add_help=False)
@@ -180,9 +183,13 @@ def main():
         "Epsilon": args.epsilon,
         "Alpha Factor": args.alpha_factor,
     }
+    elapsed = _time.time() - _t0
     parameters = {
         "Model Parameters": parameters,
-        "Attack Parameters": attack_parameters
+        "Attack Parameters": attack_parameters,
+        "Runtime (s)": round(elapsed, 1),
+        "Subset Size": dataset_subset_size(args.dataset),
+        "Random Seed": RAND_SEED,
     }
     with open(os.path.join(output_dir, "parameters.json"), "w") as f:
         json.dump(parameters, f, indent=4)

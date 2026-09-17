@@ -37,6 +37,7 @@ from configuration_files.configuration import (
     MAX_CANDIDATES_PER_WORD,
     MAX_WORDS_FOR_IMPORTANCE,
     MIN_TXT_SIMILARITY,
+    RAND_SEED,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -49,6 +50,8 @@ from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
 
 # Main evaluation function
 def main():
+    import time as _time
+    _t0 = _time.time()
     dataset_classes, load_functions = load_available_datasets()        
     # "Parameters" contains information about the model that would be attacked
     parameter_parser = argparse.ArgumentParser(add_help=False)
@@ -242,9 +245,13 @@ def main():
         "Max Candidates per Word": args.max_candidates_per_word,
         "Max Words for Importance": args.max_words_for_importance,
     }
+    elapsed = _time.time() - _t0
     parameters = {
         "Model Parameters": parameters,
-        "Attack Parameters": attack_parameters
+        "Attack Parameters": attack_parameters,
+        "Runtime (s)": round(elapsed, 1),
+        "Subset Size": dataset_subset_size(args.dataset),
+        "Random Seed": RAND_SEED,
     }
     with open(os.path.join(output_dir, "parameters.json"), "w") as f:
         json.dump(parameters, f, indent=4)

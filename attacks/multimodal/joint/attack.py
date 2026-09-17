@@ -51,6 +51,7 @@ from configuration_files.configuration import (
     MAX_CHANGE_RATIO,
     MIN_TXT_SIMILARITY,
     PGD_ITERS,
+    RAND_SEED,
     SOURCE_LABEL,
     build_subset_sampler,
     dataset_balanced_subset,
@@ -400,7 +401,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     return args, text_parameters, image_parameters
 
 
-def save_parameters(path: Path, args, text_parameters, image_parameters) -> None:
+def save_parameters(path: Path, args, text_parameters, image_parameters, runtime=None) -> None:
     payload = {
         "Fusion": {"Type": args.fusion, "Threshold": args.threshold},
         "Scenario": args.attack_scope,
@@ -431,6 +432,9 @@ def save_parameters(path: Path, args, text_parameters, image_parameters) -> None
         },
         "Text Model Parameters": text_parameters,
         "Image Model Parameters": image_parameters,
+        "Runtime (s)": round(runtime, 1) if runtime is not None else None,
+        "Subset Size": dataset_subset_size(args.dataset),
+        "Random Seed": RAND_SEED,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
@@ -439,6 +443,8 @@ def save_parameters(path: Path, args, text_parameters, image_parameters) -> None
 
 
 def main() -> None:
+    import time as _time
+    _t0 = _time.time()
     args, text_parameters, image_parameters = parse_args()
     device = torch.device(args.device)
 
@@ -600,7 +606,8 @@ def main() -> None:
         extra_columns=components,
     )
     save_parameters(
-        result_path.parent / "parameters.json", args, text_parameters, image_parameters
+        result_path.parent / "parameters.json", args, text_parameters, image_parameters,
+        runtime=_time.time() - _t0,
     )
     if perturbed_text_rows:
         save_perturbed_texts(str(dump_dir), perturbed_text_rows)

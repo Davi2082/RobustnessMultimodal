@@ -78,6 +78,7 @@ from configuration_files.configuration import (
     LATE_FUSION_BUDGET_DIVISOR,
     MAX_VARIANTS,
     PGD_ITERS,
+    RAND_SEED,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -104,7 +105,6 @@ from configuration_files.paths import (
     dataset_images_dir,
     CLEAN_IMAGE_PARAMS,
     CLEAN_TEXT_PARAMS,
-    TRAIN_SVM_MODEL,
     late_fusion_data_dir,
     model_perturbed_dir,
 )
@@ -195,7 +195,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
         "--svm_model",
         dest="svm_model",
         type=Path,
-        default=Path(TRAIN_SVM_MODEL),
+        default=None,
         help="Fitted StandardScaler + probabilistic RBF-SVC pipeline.",
     )
     model_group.add_argument(
@@ -790,6 +790,7 @@ def save_parameters(
     args: argparse.Namespace,
     text_parameters: dict[str, Any],
     image_parameters: dict[str, Any],
+    runtime: float | None = None,
 ) -> None:
     """Save attack provenance and parameters."""
     scope_budgets = late_fusion_attack_budgets(scenario)
@@ -838,6 +839,9 @@ def save_parameters(
         },
         "Text Model Parameters": text_parameters,
         "Image Model Parameters": image_parameters,
+        "Runtime (s)": round(runtime, 1) if runtime is not None else None,
+        "Subset Size": dataset_subset_size(args.dataset),
+        "Random Seed": RAND_SEED,
     }
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -848,6 +852,8 @@ def save_parameters(
 
 
 def main() -> None:
+    import time as _time
+    _t0 = _time.time()
     args, text_parameters, image_parameters = parse_args()
 
     validate_args(args, text_parameters, image_parameters)
@@ -1219,6 +1225,7 @@ def main() -> None:
             args,
             text_parameters,
             image_parameters,
+            runtime=_time.time() - _t0,
         )
 
         print(f"Saved {result_path}")

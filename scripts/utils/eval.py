@@ -24,6 +24,7 @@ from configuration_files.configuration import (
     DATASET,
     BATCH_SIZE,
     N_TOKENS,
+    RAND_SEED,
     THRESHOLD,
     build_subset_sampler,
     dataset_balanced_subset,
@@ -36,6 +37,8 @@ from scripts.utils.devices import resolve_devices
 
 # Main evaluation function
 def main():
+    import time as _time
+    _t0 = _time.time()
     dataset_classes, load_functions = load_available_datasets()
     # Here there are the evaluation parameters
     parser = argparse.ArgumentParser()
@@ -250,6 +253,10 @@ def main():
     df.to_csv(os.path.join(output_dir, "results.csv"), index=False)
     
     # Save "Parameters" in a file
+    elapsed = _time.time() - _t0
+    parameters["Runtime (s)"] = round(elapsed, 1)
+    parameters["Subset Size"] = dataset_subset_size(args.dataset)
+    parameters["Random Seed"] = RAND_SEED
     with open(os.path.join(output_dir, "parameters.json"), "w") as f:
         json.dump(parameters, f, indent=4)
 

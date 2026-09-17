@@ -33,7 +33,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from configuration_files.configuration import (
     ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS, PIPELINE_FUSIONS, dataset_devices,
 )
-from configuration_files.paths import clean_image_params, clean_text_params, model_perturbed_dir, train_svm_model
+from configuration_files.paths import clean_image_params, clean_text_params, model_perturbed_dir
+from models.fusion import fusion_head_path
 from scripts.utils.devices import resolve_devices
 
 FUSIONS = PIPELINE_FUSIONS
@@ -60,7 +61,7 @@ def build_cmd(attack, fusion, device, dataset):
            "--text-parameters", text_params, "--image-parameters", image_params,
            "--dataset", dataset]
     if fusion == "svm-rbf":
-        cmd += ["--svm-model", train_svm_model(dataset)]
+        cmd += ["--svm-model", fusion_head_path("svm-rbf", dataset)]
     return cmd
 
 
