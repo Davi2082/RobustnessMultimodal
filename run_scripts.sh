@@ -21,6 +21,7 @@ RUN_ABLATION=$(python3 -c 'from configuration_files.configuration import ABLATIO
 RUN_ADVERSARIAL=$(python3 -c 'from configuration_files.configuration import ADVERSARIAL_PIPELINE; print(int(ADVERSARIAL_PIPELINE))')
 
 mapfile -t DATASETS < <(python3 -c 'from configuration_files.configuration import DATASETS; print("\n".join(DATASETS))')
+mapfile -t TRAIN_MODELS < <(python3 -c 'from configuration_files.configuration import PIPELINE_TRAIN; print("\n".join(PIPELINE_TRAIN))')
 mapfile -t LATE_FUSIONS < <(python3 -c 'from configuration_files.configuration import PIPELINE_LATE_FUSION_MODES; print("\n".join(PIPELINE_LATE_FUSION_MODES))')
 mapfile -t FUSIONS < <(python3 -c 'from configuration_files.configuration import PIPELINE_FUSIONS; print("\n".join(PIPELINE_FUSIONS))')
 mapfile -t ATTACKS < <(python3 -c 'from configuration_files.configuration import PIPELINE_ATTACKS; print("\n".join(PIPELINE_ATTACKS))')
@@ -30,11 +31,11 @@ for DATASET in "${DATASETS[@]}"; do
     echo ""
     echo "====== PIPELINE: $DATASET ======"
 
-    # 0. Training
+    # 0. Training (models from pipeline_train in config.yaml)
     if [ "$RUN_TRAIN" -eq 1 ]; then
-        run_step "train text ($DATASET)"           python3 -m scripts.train_scripts.train --model text --dataset "$DATASET"
-        run_step "train image ($DATASET)"          python3 -m scripts.train_scripts.train --model image --dataset "$DATASET"
-        run_step "train feature-fusion ($DATASET)" python3 -m scripts.train_scripts.train --model feature-fusion --dataset "$DATASET"
+        for model in "${TRAIN_MODELS[@]}"; do
+            run_step "train $model ($DATASET)" python3 -m scripts.train_scripts.train --model "$model" --dataset "$DATASET"
+        done
     fi
 
     # 1. Clean eval

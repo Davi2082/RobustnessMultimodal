@@ -12,9 +12,10 @@ ablation_pipeline: 0
 adversarial_pipeline: 0
 
 datasets:
-  - Fakeddit
-  # - Recovery
+  - Recovery
+  # - Fakeddit
 pipeline_late_fusion_modes: [min, mean, max] # Full list: [min, mean, max, svm-rbf, linear]
+pipeline_train: [image, text, themis, svm-rbf, linear]
 pipeline_attacks: [pgd, trepat, sum] # Full list: [pgd, trepat, sum, interleaved, joint]
 
 # Models
@@ -28,10 +29,10 @@ threshold: 0.5
 # checkpoints/<dataset>/).
 dataset_configs:
   Recovery:
-    devices: [cuda:0, cuda:1]
+    devices: [cuda:1]
     device_mlm: cuda:1  # TREPAT rewriter / BERT MLM; a second GPU parallelizes text attacks
     subset_size: null   # null = full dataset (283 test samples)
-    balanced_subset: false
+    balanced_subset: true # only used when subset_size is not null
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
