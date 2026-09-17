@@ -4,19 +4,20 @@
 # are taken from this file.
 
 # Pipeline parameters - run_scripts.sh
+overwrite: 0
 rand_seed: 42
 
 train_pipeline: 0
 clean_pipeline: 1
 ablation_pipeline: 0
-adversarial_pipeline: 0
+adversarial_pipeline: 1
 
 datasets:
   - Recovery
   # - Fakeddit
-pipeline_late_fusion_modes: [] # Full list: [min, mean, max, svm-rbf, linear]
-pipeline_train: [] # Full list: image, text, themis, svm-rbf, linear
-pipeline_attacks: [pgd] # Full list: [pgd, trepat, sum, interleaved, joint]
+pipeline_fusion_modes: [feature-fusion, min, mean, max] # Full list: [feature-fusion, min, mean, max, svm-rbf, linear]
+pipeline_train: [] # Full list: image, text, feature-fusion, svm-rbf, linear
+pipeline_attacks: [pgd, trepat, sum, interleaved] # Full list: [pgd, trepat, sum, interleaved, joint]
 
 # Models
 name_llm: TinyLlama/TinyLlama-1.1B-Chat-v1.0

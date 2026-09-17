@@ -19,6 +19,7 @@ RUN_TRAIN=$(python3 -c 'from configuration_files.configuration import TRAIN_PIPE
 RUN_CLEAN=$(python3 -c 'from configuration_files.configuration import CLEAN_PIPELINE; print(int(CLEAN_PIPELINE))')
 RUN_ABLATION=$(python3 -c 'from configuration_files.configuration import ABLATION_PIPELINE; print(int(ABLATION_PIPELINE))')
 RUN_ADVERSARIAL=$(python3 -c 'from configuration_files.configuration import ADVERSARIAL_PIPELINE; print(int(ADVERSARIAL_PIPELINE))')
+OVERWRITE=$(python3 -c 'from configuration_files.configuration import OVERWRITE; print(int(OVERWRITE))')
 
 mapfile -t DATASETS < <(python3 -c 'from configuration_files.configuration import DATASETS; print("\n".join(DATASETS))')
 mapfile -t TRAIN_MODELS < <(python3 -c 'from configuration_files.configuration import PIPELINE_TRAIN; print("\n".join(PIPELINE_TRAIN))')
@@ -26,6 +27,9 @@ mapfile -t LATE_FUSIONS < <(python3 -c 'from configuration_files.configuration i
 mapfile -t FUSIONS < <(python3 -c 'from configuration_files.configuration import PIPELINE_FUSIONS; print("\n".join(PIPELINE_FUSIONS))')
 mapfile -t ATTACKS < <(python3 -c 'from configuration_files.configuration import PIPELINE_ATTACKS; print("\n".join(PIPELINE_ATTACKS))')
 M="python3 -m scripts.utils.metrics"
+
+FORCE_FLAG=""
+if [ "$OVERWRITE" -eq 1 ]; then FORCE_FLAG="--force"; fi
 
 for DATASET in "${DATASETS[@]}"; do
     echo ""
@@ -40,7 +44,7 @@ for DATASET in "${DATASETS[@]}"; do
 
     # 1. Clean eval
     if [ "$RUN_CLEAN" -eq 1 ]; then
-        run_step "clean ($DATASET)" python3 -m scripts.main_scripts.run_clean --dataset "$DATASET" --force
+        run_step "clean ($DATASET)" python3 -m scripts.main_scripts.run_clean --dataset "$DATASET" $FORCE_FLAG
 
         run_step "metrics clean text"  $M --type clean --modality text --dataset "$DATASET"
         run_step "metrics clean image" $M --type clean --modality image --dataset "$DATASET"
@@ -51,12 +55,12 @@ for DATASET in "${DATASETS[@]}"; do
 
     # 2. Ablation
     if [ "$RUN_ABLATION" -eq 1 ]; then
-        run_step "ablation ($DATASET)" python3 -m scripts.main_scripts.run_ablation --dataset "$DATASET" --force
+        run_step "ablation ($DATASET)" python3 -m scripts.main_scripts.run_ablation --dataset "$DATASET" $FORCE_FLAG
     fi
 
     # 3. Adversarial attacks + metrics
     if [ "$RUN_ADVERSARIAL" -eq 1 ]; then
-        run_step "attacks ($DATASET)" python3 -m scripts.main_scripts.run_multimodal_attacks --dataset "$DATASET" --force
+        run_step "attacks ($DATASET)" python3 -m scripts.main_scripts.run_multimodal_attacks --dataset "$DATASET" $FORCE_FLAG
 
         for atk in "${ATTACKS[@]}"; do
             for f in "${FUSIONS[@]}"; do

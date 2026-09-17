@@ -21,7 +21,7 @@ Usage:
     python3 -m scripts.main_scripts.run_multimodal_attacks --attacks sum joint --fusions mean max
 """
 
-import argparse, os, subprocess, sys, time
+import argparse, json, os, subprocess, sys, time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from configuration_files.configuration import (
@@ -136,6 +136,13 @@ def main():
         if rc != 0:
             failed += 1
             print(f"  FAILED: {attack} × {fusion}")
+        else:
+            params_path = os.path.join(output_dir, "parameters.json")
+            if os.path.isfile(params_path):
+                with open(params_path) as _f:
+                    rt = json.load(_f).get("Runtime (s)", None)
+                if rt is not None:
+                    print(f"  {attack} × {fusion} — {rt:.1f}s")
 
     elapsed = time.time() - t0
     print(f"\n{'='*70}")

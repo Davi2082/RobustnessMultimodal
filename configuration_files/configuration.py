@@ -23,6 +23,7 @@ def _number(value):
 
 
 RAND_SEED = _CFG["rand_seed"]
+OVERWRITE = bool(_CFG.get("overwrite", 0))
 
 # Pipeline stage toggles (0/1 in config.yaml)
 TRAIN_PIPELINE = bool(_CFG.get("train_pipeline", 0))
@@ -35,10 +36,9 @@ DATASETS = _CFG["datasets"]  # datasets available for full-pipeline sweeps
 DATASET = DATASETS[0]  # active dataset for scripts without their own --dataset override
 
 # Full-pipeline sweep membership (run_clean.py, run_multimodal_attacks.py, run_scripts.sh)
-_TRAIN_ALIASES = {"themis": "feature-fusion"}
-PIPELINE_TRAIN = [_TRAIN_ALIASES.get(m, m) for m in _CFG.get("pipeline_train", [])]
-PIPELINE_LATE_FUSION_MODES = _CFG["pipeline_late_fusion_modes"]
-PIPELINE_FUSIONS = PIPELINE_LATE_FUSION_MODES + ["feature-fusion"]
+PIPELINE_TRAIN = list(_CFG.get("pipeline_train", []))
+PIPELINE_FUSIONS = _CFG["pipeline_fusion_modes"]
+PIPELINE_LATE_FUSION_MODES = [m for m in PIPELINE_FUSIONS if m != "feature-fusion"]
 PIPELINE_ATTACKS = _CFG["pipeline_attacks"]
 
 # Which modality each attack type perturbs.
