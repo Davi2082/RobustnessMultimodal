@@ -30,13 +30,10 @@ class Fakeddit_Dataset(Dataset):
             self.tokenizer = tokenizer
             tokenizer.pad_token = tokenizer.eos_token
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cuda")
-            print(len(self.img_labels))
-            print(len(self.imgs_path))
-            print(len(self.texts))
-            
+
         def __len__(self):
             return len(self.img_labels)
-        
+
         def __getitem__(self, idx):
             img_path = os.path.join(self.img_dir, self.imgs_path[idx])
             image = Image.open(img_path).convert("RGB")
@@ -72,9 +69,7 @@ class Recovery_Dataset(Dataset):
             self.tokenizer = tokenizer
             tokenizer.pad_token = tokenizer.eos_token
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cuda")
-            print(len(self.img_labels))
-            print(len(self.imgs_path))
-            print(len(self.texts))
+
         def __len__(self):
             return len(self.img_labels)
         
