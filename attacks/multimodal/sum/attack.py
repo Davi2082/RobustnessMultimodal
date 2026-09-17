@@ -389,6 +389,10 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
         help="MLM / rephraser device (default: from config).",
     )
 
+    shard_group = parser.add_argument_group("multi-GPU sample sharding")
+    shard_group.add_argument("--shard-id", dest="shard_id", type=int, default=0)
+    shard_group.add_argument("--num-shards", dest="num_shards", type=int, default=1)
+
     args = parser.parse_args()
 
     if args.fusion == "svm_rbf":
@@ -927,6 +931,10 @@ def main() -> None:
 
     if args.subset_size is not None:
         sampler = build_subset_sampler(dataset_test, args.subset_size, dataset_balanced_subset(args.dataset))
+
+    if args.num_shards > 1:
+        from scripts.utils.parallel import shard_sampler
+        sampler = shard_sampler(sampler, len(dataset_test), args.shard_id, args.num_shards)
 
     dataloader_test = DataLoader(
         dataset_test,

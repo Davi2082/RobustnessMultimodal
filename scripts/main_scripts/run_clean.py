@@ -89,7 +89,7 @@ def main():
 
     t0 = time.time()
 
-    # GPU eval jobs (text, image, feature-fusion) — sequential, each uses DataParallel internally
+    # GPU eval jobs (text, image, feature-fusion) — sequential, each uses devices[0]
     jobs = [
         ("text",           os.path.join(model_clean_dir("text", args.dataset), "results.csv"),
          [sys.executable, "-m", "scripts.utils.eval",

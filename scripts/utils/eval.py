@@ -75,10 +75,10 @@ def main():
         "Dataset": args.dataset,
     }
 
-    # Device setting
+    # Device setting — use the first configured device (DataParallel is
+    # incompatible with HuggingFace transformer internals like RoPE caches)
     args.devices = resolve_devices(args.devices)
     device = torch.device(args.devices[0])
-    device_ids = [int(d.replace("cuda:", "")) for d in args.devices] if len(args.devices) > 1 else None
 
     # Model with relative tokenizer and processor loading
     if args.modality == "late-fusion":
@@ -93,9 +93,6 @@ def main():
         img_model, _, processor = load_model(device, args)
         parameters["Image Model Path"] = args.model_path
         args.modality = "late-fusion"
-        if device_ids:
-            txt_model = torch.nn.DataParallel(txt_model, device_ids=device_ids)
-            img_model = torch.nn.DataParallel(img_model, device_ids=device_ids)
     else:
         if args.model_path is None:
             if args.modality == "text":
@@ -103,8 +100,6 @@ def main():
             elif args.modality == "image":
                 args.model_path = args.image_model_path or image_weights_path(args.dataset)
         model, tokenizer, processor = load_model(device, args)
-        if device_ids:
-            model = torch.nn.DataParallel(model, device_ids=device_ids)
     
     # Other parameters saved in the parameters dictionary (after load_model which
     # overrides name_img_embed from the checkpoint filename)

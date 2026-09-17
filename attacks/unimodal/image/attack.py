@@ -72,6 +72,11 @@ def main():
     parser.add_argument("--experiment-name", default="pgd")
     parser.add_argument("--device", type=str, default=None,
                         help="GPU device. Defaults to the dataset's configured device.")
+    parser.add_argument("--device-mlm", dest="device_mlm", type=str, default=None,
+                        help="Unused for PGD; accepted for sharded launch compatibility.")
+    parser.add_argument("--output-dir", dest="output_dir", type=str, default=None)
+    parser.add_argument("--shard-id", dest="shard_id", type=int, default=0)
+    parser.add_argument("--num-shards", dest="num_shards", type=int, default=1)
     args = parser.parse_args()
 
     # Device setting
@@ -85,7 +90,7 @@ def main():
     load_func = load_functions[args.dataset]
 
     # Results dir setup — results/<dataset>/image/perturbed/<attack>/
-    output_dir = model_perturbed_dir("image", args.experiment_name, args.dataset)
+    output_dir = args.output_dir or model_perturbed_dir("image", args.experiment_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
@@ -100,6 +105,9 @@ def main():
     )
     
     sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    if args.num_shards > 1:
+        from scripts.utils.parallel import shard_sampler
+        sampler = shard_sampler(sampler, len(dataset_test), args.shard_id, args.num_shards)
     if sampler is not None:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:

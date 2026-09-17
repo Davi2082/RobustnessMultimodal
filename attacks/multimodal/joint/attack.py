@@ -377,9 +377,13 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", default=DEVICES[0])
+    parser.add_argument("--device-mlm", dest="device_mlm", type=str, default=None,
+                        help="Unused for joint; accepted for sharded launch compatibility.")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--dump-dir", type=Path, default=None)
     parser.add_argument("--dataset", type=str, default=None)
+    parser.add_argument("--shard-id", dest="shard_id", type=int, default=0)
+    parser.add_argument("--num-shards", dest="num_shards", type=int, default=1)
     args = parser.parse_args()
 
     text_parameters = read_parameters(args.text_parameters, "Text model")
@@ -482,6 +486,9 @@ def main() -> None:
         if args.subset_size is not None
         else None
     )
+    if args.num_shards > 1:
+        from scripts.utils.parallel import shard_sampler
+        sampler = shard_sampler(sampler, len(dataset_test), args.shard_id, args.num_shards)
     dataloader = DataLoader(
         dataset_test,
         batch_size=args.batch_size,

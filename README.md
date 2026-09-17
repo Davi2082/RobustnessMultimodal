@@ -39,6 +39,8 @@ All pipeline settings live in `config.yaml`:
 
 Subset sampling is configured per-dataset inside `dataset_configs` (`subset_size`, `balanced_subset`). Training hyperparameters, attack parameters, and model settings are also in `config.yaml`. Python code reads them via `configuration_files/configuration.py`.
 
+When multiple GPUs are listed in `devices`, adversarial attacks shard samples across GPUs, each GPU loads both the victim model and any attack models (rewriter/MLM).
+
 ---
 
 ## Running the full pipeline

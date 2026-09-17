@@ -98,6 +98,9 @@ def main():
                         help="GPU device. Defaults to the dataset's configured device.")
     parser.add_argument("--device-mlm", type=str, default=None,
                         help="TREPAT rewriter / BERT MLM device. Defaults to the dataset's configured MLM device.")
+    parser.add_argument("--output-dir", dest="output_dir", type=str, default=None)
+    parser.add_argument("--shard-id", dest="shard_id", type=int, default=0)
+    parser.add_argument("--num-shards", dest="num_shards", type=int, default=1)
     args = parser.parse_args()
 
     # Device setting
@@ -127,7 +130,7 @@ def main():
 
     # Results dir setup — results/<dataset>/text/perturbed/<attack>/
     attack_name = args.experiment_name or args.attack_method
-    output_dir = model_perturbed_dir("text", attack_name, args.dataset)
+    output_dir = args.output_dir or model_perturbed_dir("text", attack_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
 
     # Dataset obtaination
@@ -143,6 +146,9 @@ def main():
     
     # Dataloader creation (optionally restricted to a balanced subset)
     sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    if args.num_shards > 1:
+        from scripts.utils.parallel import shard_sampler
+        sampler = shard_sampler(sampler, len(dataset_test), args.shard_id, args.num_shards)
     if sampler is not None:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:

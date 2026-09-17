@@ -1,6 +1,7 @@
 """Adversarial attacks on all fusion methods.
 
-Runs five attack types against every fusion method:
+Runs attack types against every fusion method, sharding samples across GPUs
+when multiple devices are configured.
 
   Attack type             Script                           Optimization
   ─────────────────────── ──────────────────────────────── ────────────
@@ -10,24 +11,17 @@ Runs five attack types against every fusion method:
   PGD + TREPAT (alt.)     attacks.multimodal.sum.attack    interleaved, scope=both
   HotFlip + PGD (joint)   attacks.multimodal.joint.attack  scope=both
 
-Fusion methods:  min, mean, max, svm-rbf, linear, feature-fusion
-
-Output layout:
-  results/.../perturbed/late-fusion/<fusion>/              ← sum (both-perturbed)
-  results/.../perturbed/late-fusion-pgd/<fusion>/          ← PGD only
-  results/.../perturbed/late-fusion-trepat/<fusion>/       ← TREPAT only
-  results/.../perturbed/late-fusion-interleaved/<fusion>/  ← interleaved
-  results/.../perturbed/late-fusion-joint/<fusion>/        ← joint
+With multiple GPUs, each attack job splits its samples across all devices.
+Each GPU loads both the victim model and any attack models (rewriter/MLM),
+giving near-linear speedup for sequential attacks like TREPAT.
 
 Usage:
-    python3 -m scripts.main_scripts.run_multimodal_attacks                          # single GPU, all 5×6
-    python3 -m scripts.main_scripts.run_multimodal_attacks --devices cuda:0 cuda:1  # 2 GPUs parallel
-    python3 -m scripts.main_scripts.run_multimodal_attacks --devices cuda:0 cuda:1 cuda:2  # 3 GPUs
+    python3 -m scripts.main_scripts.run_multimodal_attacks
+    python3 -m scripts.main_scripts.run_multimodal_attacks --devices cuda:0 cuda:1
     python3 -m scripts.main_scripts.run_multimodal_attacks --attacks sum joint --fusions mean max
 """
 
-import argparse, os, subprocess, sys, threading, time
-from queue import Queue
+import argparse, os, subprocess, sys, time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from configuration_files.configuration import (
@@ -42,26 +36,25 @@ ATTACKS = PIPELINE_ATTACKS
 LOG_DIR = "logs/multimodal_attacks"
 
 
-def build_cmd(attack, fusion, device, dataset):
+def build_base_cmd(attack, fusion, dataset):
+    """Build the command list WITHOUT --device/--device-mlm/--output-dir/--shard args."""
     scope = ATTACK_SCOPE[attack]
-    output_dir = model_perturbed_dir(fusion, attack, dataset)
     text_params = clean_text_params(dataset)
     image_params = clean_image_params(dataset)
     if attack == "joint":
-        return [sys.executable, "-m", "attacks.multimodal.joint.attack",
-                "--fusion", fusion, "--attack-scope", scope,
-                "--device", device, "--output-dir", output_dir,
-                "--text-parameters", text_params, "--image-parameters", image_params,
-                "--dataset", dataset]
-    optimization = "interleaved" if attack == "interleaved" else "sum"
-    cmd = [sys.executable, "-m", "attacks.multimodal.sum.attack",
-           "--fusion", fusion, "--attack-scope", scope,
-           "--optimization", optimization, "--device", device,
-           "--output-dir", output_dir,
-           "--text-parameters", text_params, "--image-parameters", image_params,
-           "--dataset", dataset]
-    if fusion == "svm-rbf":
-        cmd += ["--svm-model", fusion_head_path("svm-rbf", dataset)]
+        cmd = [sys.executable, "-m", "attacks.multimodal.joint.attack",
+               "--fusion", fusion, "--attack-scope", scope,
+               "--text-parameters", text_params, "--image-parameters", image_params,
+               "--dataset", dataset]
+    else:
+        optimization = "interleaved" if attack == "interleaved" else "sum"
+        cmd = [sys.executable, "-m", "attacks.multimodal.sum.attack",
+               "--fusion", fusion, "--attack-scope", scope,
+               "--optimization", optimization,
+               "--text-parameters", text_params, "--image-parameters", image_params,
+               "--dataset", dataset]
+        if fusion == "svm-rbf":
+            cmd += ["--svm-model", fusion_head_path("svm-rbf", dataset)]
     return cmd
 
 
@@ -69,86 +62,17 @@ def result_csv_path(attack, fusion, dataset):
     return os.path.join(model_perturbed_dir(fusion, attack, dataset), "perturbed_results.csv")
 
 
-def run_sequential(jobs, device, dataset, log_to_file):
-    done, failed = 0, 0
-    for attack, fusion in jobs:
-        done += 1
-        cmd = build_cmd(attack, fusion, device, dataset)
-        log_path = os.path.join(LOG_DIR, f"{attack}_{fusion}.log") if log_to_file else None
-        print(f"\n{'='*70}\n[{done}/{len(jobs)}] {attack} × {fusion}  ({device})")
-        print(f">>> {' '.join(cmd)}")
-        if log_path:
-            print(f"    log: {log_path}")
-        print("=" * 70)
-        sys.stdout.flush()
-        if log_path:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "w") as lf:
-                rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT).returncode
-        else:
-            rc = subprocess.run(cmd).returncode
-        if rc != 0:
-            failed += 1
-            print(f"  FAILED (exit {rc})")
-            if log_path:
-                print(f"  Check log: {log_path}")
-    return done, failed
+def run_single_gpu(base_cmd, device, output_dir):
+    """Run a single job on one GPU (no sharding)."""
+    cmd = base_cmd + ["--device", device, "--device-mlm", device, "--output-dir", output_dir]
+    return subprocess.run(cmd).returncode
 
 
-def gpu_worker(device, job_queue, dataset, results, lock):
-    while True:
-        item = job_queue.get()
-        if item is None:
-            break
-        idx, total, attack, fusion = item
-        cmd = build_cmd(attack, fusion, device, dataset)
-        log_path = os.path.join(LOG_DIR, f"{attack}_{fusion}.log")
-        os.makedirs(LOG_DIR, exist_ok=True)
-        with lock:
-            print(f"  [{idx}/{total}] {attack} × {fusion}  →  {device}  (log: {log_path})")
-            sys.stdout.flush()
-        with open(log_path, "w") as lf:
-            rc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT).returncode
-        status = "OK" if rc == 0 else f"FAILED (exit {rc})"
-        with lock:
-            print(f"  [{idx}/{total}] {attack} × {fusion}  →  {device}  {status}")
-            sys.stdout.flush()
-            results.append((attack, fusion, device, rc))
-
-
-def run_parallel(jobs, devices, dataset):
-    os.makedirs(LOG_DIR, exist_ok=True)
-    total = len(jobs)
-    print(f"\n  Parallel: {total} jobs across {len(devices)} GPU(s): {', '.join(devices)}")
-    for i, (attack, fusion) in enumerate(jobs):
-        print(f"    [{i+1}] {attack} × {fusion}")
-    print()
-    sys.stdout.flush()
-
-    job_queue = Queue()
-    for i, (attack, fusion) in enumerate(jobs):
-        job_queue.put((i + 1, total, attack, fusion))
-    for _ in devices:
-        job_queue.put(None)
-
-    results, lock, threads = [], threading.Lock(), []
-    for device in devices:
-        t = threading.Thread(target=gpu_worker,
-                             args=(device, job_queue, dataset, results, lock))
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join()
-
-    done = len(results)
-    failed = sum(1 for _, _, _, rc in results if rc != 0)
-    if failed:
-        print(f"\n  Failed runs:")
-        for attack, fusion, device, rc in results:
-            if rc != 0:
-                print(f"    {attack} × {fusion} on {device} — exit {rc}")
-                print(f"      log: {LOG_DIR}/{attack}_{fusion}.log")
-    return done, failed
+def run_sharded(base_cmd, devices, output_dir):
+    """Run a single job sharded across multiple GPUs."""
+    from scripts.utils.parallel import launch_sharded_attack
+    _, failed = launch_sharded_attack(base_cmd, devices, output_dir)
+    return 1 if failed else 0
 
 
 def main():
@@ -156,17 +80,18 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", default=DATASET)
     parser.add_argument("--devices", nargs="+", default=None, metavar="DEV",
-                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. Multiple = parallel. "
-                             "Defaults to the dataset's configured devices.")
+                        help="GPU device(s): cuda:0 cuda:1 ... or 'all'. "
+                             "Multiple devices shard samples across GPUs.")
     parser.add_argument("--fusions", nargs="+", default=FUSIONS, choices=FUSIONS, metavar="F")
     parser.add_argument("--attacks", nargs="+", default=ATTACKS, choices=ATTACKS, metavar="A")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if results already exist.")
-    parser.add_argument("--log", action="store_true")
     args = parser.parse_args()
 
     if args.devices is None:
         args.devices = dataset_devices(args.dataset)
+    args.devices = resolve_devices(args.devices)
+    multi_gpu = len(args.devices) > 1
 
     all_jobs, skipped = [], 0
     for attack in args.attacks:
@@ -177,17 +102,14 @@ def main():
                 continue
             all_jobs.append((attack, fusion))
 
-    args.devices = resolve_devices(args.devices)
-    parallel = len(args.devices) > 1
-
     print("=" * 70)
     print(f"MULTIMODAL ATTACKS — {args.dataset}")
     print(f"  Fusions:  {', '.join(args.fusions)}")
     print(f"  Attacks:  {', '.join(args.attacks)}")
-    if parallel:
-        print(f"  Devices:  {', '.join(args.devices)}  (parallel)")
+    if multi_gpu:
+        print(f"  Devices:  {', '.join(args.devices)}  (sample sharding)")
     else:
-        print(f"  Device:   {args.devices[0]}  (sequential)")
+        print(f"  Device:   {args.devices[0]}")
     print(f"  Jobs:     {len(all_jobs)} to run, {skipped} skipped")
     print("=" * 70)
 
@@ -196,16 +118,30 @@ def main():
         return
 
     t0 = time.time()
-    if parallel:
-        done, failed = run_parallel(all_jobs, args.devices, args.dataset)
-    else:
-        done, failed = run_sequential(all_jobs, args.devices[0], args.dataset, args.log)
+    done, failed = 0, 0
+
+    for i, (attack, fusion) in enumerate(all_jobs):
+        output_dir = model_perturbed_dir(fusion, attack, args.dataset)
+        base_cmd = build_base_cmd(attack, fusion, args.dataset)
+
+        print(f"\n[{i+1}/{len(all_jobs)}] {attack} × {fusion}")
+        sys.stdout.flush()
+
+        if multi_gpu:
+            rc = run_sharded(base_cmd, args.devices, output_dir)
+        else:
+            rc = run_single_gpu(base_cmd, args.devices[0], output_dir)
+
+        done += 1
+        if rc != 0:
+            failed += 1
+            print(f"  FAILED: {attack} × {fusion}")
 
     elapsed = time.time() - t0
     print(f"\n{'='*70}")
     print(f"MULTIMODAL ATTACKS COMPLETE — {done - failed}/{done} succeeded ({elapsed/60:.0f} min)")
     if failed:
-        print(f"  {failed} runs FAILED — check logs in {LOG_DIR}/")
+        print(f"  {failed} runs FAILED")
     print("=" * 70)
 
 
