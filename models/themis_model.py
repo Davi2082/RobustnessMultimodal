@@ -175,34 +175,25 @@ def get_Themis(
     merge_tokens=None,
     device="cuda:0"
 ):
-    # model = AutoModelForCausalLM.from_pretrained("microsoft/phi-2", torch_dtype="auto", trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        name_llm, device_map={"": str(device)}, trust_remote_code=True
+        name_llm, trust_remote_code=True
     )
     tokenizer = AutoTokenizer.from_pretrained(name_llm, trust_remote_code=True)
 
-    # prompt = "Hey, are you conscious? Can you talk to me?"
-    # inputs = tokenizer(prompt, return_tensors="pt")
-
-    # # Generate
-    # generate_ids = model.generate(inputs.input_ids, max_length=2048)
-    # print(model.config)
-    # print(generate_ids.shape)
-    # exit()
     if "clip" in name_img_embed:
         img_embed = CLIPVisionModel.from_pretrained(
-            name_img_embed, device_map={"": str(device)}, trust_remote_code=True
+            name_img_embed, trust_remote_code=True
         )
     elif "instruct" in name_img_embed:
         img_embed = InstructBlipVisionModel.from_pretrained(
-            name_img_embed, device_map={"": str(device)}, trust_remote_code=True
+            name_img_embed, trust_remote_code=True
         )
     else:
         img_embed = AutoModel.from_pretrained(
-            name_img_embed, device_map={"": str(device)}, trust_remote_code=True
+            name_img_embed, trust_remote_code=True
         )
     processor = AutoImageProcessor.from_pretrained(
-        name_img_embed, trust_remote_code=True, device_map={"": str(device)}
+        name_img_embed, trust_remote_code=True
     )
 
     # add a model head for classification

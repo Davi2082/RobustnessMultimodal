@@ -29,7 +29,6 @@ class Fakeddit_Dataset(Dataset):
             self.preprocessor = preprocessor
             self.tokenizer = tokenizer
             tokenizer.pad_token = tokenizer.eos_token
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cuda")
 
         def __len__(self):
             return len(self.img_labels)
@@ -42,7 +41,7 @@ class Fakeddit_Dataset(Dataset):
             if self.tokenizer:
                 if text == "" or text == None:
                     text = "Blank"
-                text = self.tokenizer(text, 
+                text = self.tokenizer(text,
                                       return_tensors="pt",
                                       padding='max_length',
                                       truncation=True,
@@ -50,7 +49,7 @@ class Fakeddit_Dataset(Dataset):
                                       max_length=self.n_tokens)
             if self.preprocessor:
                 image = self.preprocessor(images=image, return_tensors="pt")
-            
+
             return image, label, text, img_path, idx
 
 class Recovery_Dataset(Dataset):
@@ -68,7 +67,6 @@ class Recovery_Dataset(Dataset):
             self.preprocessor = preprocessor
             self.tokenizer = tokenizer
             tokenizer.pad_token = tokenizer.eos_token
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cuda")
 
         def __len__(self):
             return len(self.img_labels)
