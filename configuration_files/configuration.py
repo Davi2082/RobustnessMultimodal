@@ -40,6 +40,7 @@ PIPELINE_TRAIN = list(_CFG.get("pipeline_train", []))
 PIPELINE_FUSIONS = _CFG["pipeline_fusion_modes"]
 PIPELINE_LATE_FUSION_MODES = [m for m in PIPELINE_FUSIONS if m != "feature-fusion"]
 PIPELINE_ATTACKS = _CFG["pipeline_attacks"]
+ATTACK_LABELS = _CFG["attack_labels"]
 
 # Which modality each attack type perturbs.
 ATTACK_SCOPE = {
@@ -164,7 +165,8 @@ ALTERNATION_ROUNDS = _CFG["alternation_rounds"]  # Rounds of interleaved image-P
 # attacks. A single-modality scenario keeps that full budget. Only the "both"
 # scenario splits the comparison budget and therefore uses half for each
 # independently attacked modality.
-LATE_FUSION_ATTACK_SCOPES = tuple(_CFG["late_fusion_attack_scopes"])
+# The scopes an attack may perturb are exactly the values of ATTACK_SCOPE,
+ATTACK_SCOPES = tuple(dict.fromkeys(ATTACK_SCOPE.values()))
 LATE_FUSION_BUDGET_DIVISOR = _CFG["late_fusion_budget_divisor"]
 
 
@@ -197,5 +199,3 @@ def build_subset_sampler(dataset, subset_size, balanced=None):
 
 
 LATE_FUSION_INPUT = _CFG["late_fusion_input"]
-LATE_FUSION_SVM_C = _CFG["late_fusion_svm_c"]
-LATE_FUSION_SVM_GAMMA = _CFG["late_fusion_svm_gamma"]

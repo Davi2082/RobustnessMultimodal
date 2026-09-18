@@ -48,6 +48,7 @@ for DATASET in "${DATASETS[@]}"; do
 
         run_step "metrics clean text"  $M --type clean --modality text --dataset "$DATASET"
         run_step "metrics clean image" $M --type clean --modality image --dataset "$DATASET"
+        run_step "metrics clean feature-fusion" $M --type clean --modality feature-fusion --dataset "$DATASET"
         for f in "${LATE_FUSIONS[@]}"; do
             run_step "metrics clean $f" $M --type clean --modality late-fusion --mode "$f" --dataset "$DATASET"
         done
@@ -60,11 +61,23 @@ for DATASET in "${DATASETS[@]}"; do
 
     # 3. Adversarial attacks + metrics
     if [ "$RUN_ADVERSARIAL" -eq 1 ]; then
-        run_step "attacks ($DATASET)" python3 -m scripts.main_scripts.run_multimodal_attacks --dataset "$DATASET" $FORCE_FLAG
+        # Unimodal attacks
+        run_step "image attack ($DATASET)" python3 -m attacks.unimodal.image.attack --dataset "$DATASET"
+        run_step "metrics image/pgd" $M --type perturbed --modality image --attack pgd --dataset "$DATASET"
+
+        run_step "text attack ($DATASET)" python3 -m attacks.unimodal.text.attack --dataset "$DATASET"
+        run_step "metrics text/trepat" $M --type perturbed --modality text --attack trepat --dataset "$DATASET"
+
+        # Multimodal attacks
+        run_step "multimodal attacks ($DATASET)" python3 -m scripts.main_scripts.run_multimodal_attacks --dataset "$DATASET" $FORCE_FLAG
 
         for atk in "${ATTACKS[@]}"; do
             for f in "${FUSIONS[@]}"; do
-                run_step "metrics $f/$atk" $M --type perturbed --modality late-fusion --mode "$f" --attack "$atk" --dataset "$DATASET"
+                if [ "$f" = "feature-fusion" ]; then
+                    run_step "metrics $f/$atk" $M --type perturbed --modality feature-fusion --attack "$atk" --dataset "$DATASET"
+                else
+                    run_step "metrics $f/$atk" $M --type perturbed --modality late-fusion --mode "$f" --attack "$atk" --dataset "$DATASET"
+                fi
             done
         done
     fi

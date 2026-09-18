@@ -4,20 +4,28 @@
 # are taken from this file.
 
 # Pipeline parameters - run_scripts.sh
-overwrite: 0
+overwrite: 1
 rand_seed: 42
 
-train_pipeline: 0
+train_pipeline: 1
 clean_pipeline: 1
-ablation_pipeline: 0
+ablation_pipeline: 1
 adversarial_pipeline: 1
 
 datasets:
-  - Recovery
-  # - Fakeddit
-pipeline_fusion_modes: [feature-fusion, min, mean, max] # Full list: [feature-fusion, min, mean, max, svm-rbf, linear]
-pipeline_train: [] # Full list: image, text, feature-fusion, svm-rbf, linear
+  # - Recovery
+  - Fakeddit
+
+pipeline_fusion_modes: [feature-fusion, min, mean, max, svm-rbf, linear] # Full list: [feature-fusion, min, mean, max, svm-rbf, linear]
+pipeline_train: [svm-rbf, linear] # Full list: image, text, feature-fusion, svm-rbf, linear
 pipeline_attacks: [pgd, trepat, sum, interleaved] # Full list: [pgd, trepat, sum, interleaved, joint]
+attack_labels:
+  pgd: PGD
+  trepat: TREPAT
+  sum: PGD+TREPAT
+  interleaved: Interleaved
+  joint: Joint
+late_fusion_budget_divisor: 2  # 'both' splits the budget across the two modalities
 
 # Models
 name_llm: TinyLlama/TinyLlama-1.1B-Chat-v1.0
@@ -32,7 +40,7 @@ dataset_configs:
   Recovery:
     devices: [cuda:0, cuda:1]  # multiple GPUs shard attack samples for parallel speedup
     device_mlm: cuda:0  # fallback for standalone unimodal text attack (ignored when sharding)
-    subset_size: 2   # null = full dataset (283 test samples)
+    subset_size: 200   # null = full dataset (283 test samples)
     balanced_subset: true # only used when subset_size is not null
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
@@ -46,8 +54,7 @@ dataset_configs:
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
 
-# Training parameters
-## Themis model
+# Training parameters (neural models: text, image, feature-fusion)
 epochs: 10
 learning_rate: 1e-4
 lora_alpha: 8
@@ -56,19 +63,18 @@ lora_dropout: 0.4
 use_lora: true
 merge_tokens: 0
 num_workers: 0
-# The RBF-SVM
-late_fusion_input: scores
-late_fusion_svm_c: 1.0
-late_fusion_svm_gamma: scale
+
+# Late-fusion head fitting (svm-rbf, linear)
+late_fusion_input: scores  # scores or logits — feature space for the fusion heads
 
 # Attack parameters (for targetted attacks)
 source_label: 0  # Fake
 target_label: 1  # Real
 
 # Image attack parameters
-pgd_iters: 50
-epsilon: 16/255
-alpha_factor: 0.4  # alpha = eps/(iters*factor)
+pgd_iters: 10 # 50
+epsilon: 8/255 # 16/255
+alpha_factor: 0.01
 
 # TrePat attack parameters (matched to paper's final-evaluation config)
 attack_model: LLAMA3B  # meta-llama/Llama-3.2-3B-Instruct, as reported in the paper.
@@ -94,12 +100,3 @@ use_bpe: 1  # BPE for semantic constraint presevation while replacing tokens wit
 
 # Multimodal attack parameters
 alternation_rounds: 1  # Rounds of interleaved image-PGD + text-BERTAttack (1 = single biperturbed pass)
-
-# Late-fusion experiments
-#
-# pgd_iters and max_variants are the budgets of the corresponding unimodal
-# attacks. A single-modality scenario keeps that full budget. Only the "both"
-# scenario splits the comparison budget and therefore uses half for each
-# independently attacked modality.
-late_fusion_attack_scopes: [image, text, both]
-late_fusion_budget_divisor: 2

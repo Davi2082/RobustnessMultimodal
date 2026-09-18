@@ -27,7 +27,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from configuration_files.configuration import DATASET, SOURCE_LABEL, TARGET_LABEL
+from configuration_files.configuration import ATTACK_LABELS, DATASET, PIPELINE_FUSIONS, PIPELINE_ATTACKS, SOURCE_LABEL, TARGET_LABEL
 from configuration_files.paths import (
     model_clean_dir,
     model_perturbed_dir,
@@ -36,15 +36,9 @@ from configuration_files.paths import (
 
 
 UNIMODAL = ["text", "image"]
-LATE_FUSION_MODES = ["min", "mean", "max", "linear", "svm-rbf"]
+LATE_FUSION_MODES = [m for m in PIPELINE_FUSIONS if m != "feature-fusion"]
 FUSIONS = LATE_FUSION_MODES + ["feature-fusion"]
-
-ATTACK_LABELS = {
-    "pgd": "PGD",
-    "trepat": "TREPAT",
-    "sum": "PGD+TREPAT",
-}
-ATTACKS = list(ATTACK_LABELS.keys())
+ATTACKS = PIPELINE_ATTACKS
 
 
 DISPLAY_NAMES = {
@@ -188,7 +182,7 @@ def print_adversarial_table(dataset):
     print(f"  {separator(w)}")
 
     for attack in ATTACKS:
-        label = ATTACK_LABELS[attack]
+        label = ATTACK_LABELS.get(attack, attack.upper())
         first = True
 
         for model in FUSIONS:

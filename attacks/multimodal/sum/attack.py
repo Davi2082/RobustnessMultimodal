@@ -76,7 +76,7 @@ from configuration_files.configuration import (
     MAX_WORDS_TO_ATTACK,
     MIN_TXT_SIMILARITY,
     SOURCE_LABEL,
-    LATE_FUSION_ATTACK_SCOPES,
+    ATTACK_SCOPES,
     LATE_FUSION_BUDGET_DIVISOR,
     MAX_VARIANTS,
     PGD_ITERS,
@@ -91,8 +91,10 @@ from configuration_files.configuration import (
 
 def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
     """Return the scope-specific effective budgets and their divisor."""
-    if attack_scope not in LATE_FUSION_ATTACK_SCOPES:
-        raise ValueError(f"Unknown late-fusion attack scope: {attack_scope}")
+    if attack_scope not in ATTACK_SCOPES:
+        raise ValueError(
+            f"Unknown attack scope: {attack_scope}; expected one of {ATTACK_SCOPES}"
+        )
 
     divisor = LATE_FUSION_BUDGET_DIVISOR if attack_scope == "both" else 1
     return {
