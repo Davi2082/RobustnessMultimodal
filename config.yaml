@@ -38,16 +38,16 @@ threshold: 0.5
 # checkpoints/<dataset>/).
 dataset_configs:
   Recovery:
-    devices: [cuda:0, cuda:1]  # multiple GPUs shard attack samples for parallel speedup
-    device_mlm: cuda:0  # fallback for standalone unimodal text attack (ignored when sharding)
-    subset_size: 200   # null = full dataset (283 test samples)
+    devices: [cuda:1]  # multiple GPUs shard attack samples for parallel speedup
+    device_mlm: cuda:1  # fallback for standalone unimodal text attack (ignored when sharding)
+    subset_size: null   # null = full dataset (283 test samples)
     balanced_subset: true # only used when subset_size is not null
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
   Fakeddit:
-    devices: [cuda:0, cuda:1]
-    device_mlm: cuda:0
+    devices: [cuda:1]
+    device_mlm: cuda:1
     subset_size: 200    # balanced across classes when balanced_subset is true
     balanced_subset: true
     text_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_txt_only.pt
