@@ -15,10 +15,14 @@ with open(_CONFIG_PATH, encoding="utf-8") as _f:
 
 
 def _number(value):
-    """Accept a plain number or an 'a/b' fraction string (e.g. '16/255')."""
+    """Accept a plain number, an 'a/b' fraction string (e.g. '16/255'), or a
+    scientific-notation string (e.g. '1e-4' — YAML 1.1 only auto-parses this
+    as a float when it contains a decimal point, so PyYAML leaves it a str)."""
     if isinstance(value, str) and "/" in value:
         num, denom = value.split("/")
         return float(num) / float(denom)
+    if isinstance(value, str):
+        return float(value)
     return value
 
 
@@ -100,15 +104,16 @@ TEXT_WEIGHTS_PATH = text_weights_path()
 IMAGE_WEIGHTS_PATH = image_weights_path()
 FF_WEIGHTS_PATH = ff_weights_path()
 
-# Training parameters
-EPOCHS = _CFG["epochs"]
-LEARNING_RATE = _CFG["learning_rate"]
-LORA_ALPHA = _CFG["lora_alpha"]
-LORA_R = _CFG["lora_r"]
-LORA_DROPOUT = _CFG["lora_dropout"]
-USE_LORA = _CFG["use_lora"]
-MERGE_TOKENS = _CFG["merge_tokens"]
-NUM_WORKERS = _CFG["num_workers"]
+# Training parameters (neural models)
+_TRAINING_NEURAL = _CFG["training_neural"]
+EPOCHS = _TRAINING_NEURAL["epochs"]
+LEARNING_RATE = _number(_TRAINING_NEURAL["learning_rate"])
+LORA_ALPHA = _TRAINING_NEURAL["lora_alpha"]
+LORA_R = _TRAINING_NEURAL["lora_r"]
+LORA_DROPOUT = _TRAINING_NEURAL["lora_dropout"]
+USE_LORA = _TRAINING_NEURAL["use_lora"]
+MERGE_TOKENS = _TRAINING_NEURAL["merge_tokens"]
+NUM_WORKERS = _TRAINING_NEURAL["num_workers"]
 
 # Model parameters
 BATCH_SIZE = _CFG["batch_size"]
@@ -198,4 +203,10 @@ def build_subset_sampler(dataset, subset_size, balanced=None):
     return sampler
 
 
-LATE_FUSION_INPUT = _CFG["late_fusion_input"]
+# Late-fusion head fitting
+_TRAINING_LF = _CFG["training_late_fusion"]
+LATE_FUSION_INPUT = _TRAINING_LF["late_fusion_input"]
+SVM_RBF_C_GRID = _TRAINING_LF["svm-rbf"]["c_grid"]
+SVM_RBF_GAMMA_GRID = _TRAINING_LF["svm-rbf"]["gamma_grid"]
+LINEAR_EPOCHS = _TRAINING_LF["linear"]["epochs"]
+LINEAR_LEARNING_RATE = _number(_TRAINING_LF["linear"]["learning_rate"])

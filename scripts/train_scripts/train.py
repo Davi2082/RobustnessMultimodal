@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from sklearn.pipeline import make_pipeline
@@ -34,9 +33,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE, LORA_ALPHA, LORA_DROPOUT,
-    LORA_R, MERGE_TOKENS, NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS,
-    RAND_SEED, USE_LORA,
+    BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE, LINEAR_EPOCHS,
+    LINEAR_LEARNING_RATE, LORA_ALPHA, LORA_DROPOUT, LORA_R, MERGE_TOKENS,
+    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED,
+    SVM_RBF_C_GRID, SVM_RBF_GAMMA_GRID, USE_LORA,
     dataset_devices, ff_weights_path, image_weights_path, text_weights_path,
 )
 from configuration_files.paths import dataset_weights_dir
@@ -52,7 +52,6 @@ NEURAL_MODELS = ("text", "image", "feature-fusion")
 FUSION_HEADS = ("svm-rbf", "linear")
 MODEL_CHOICES = NEURAL_MODELS + FUSION_HEADS
 
-CS = [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
 
 # Checkpoint filenames encode the backbone + LoRA hyperparameters actually used
 # for the run: <encoder>_<merge_tokens>_<lora_alpha>_<lora_r>_<lora_dropout>_<use_lora><epochs>_best<suffix>.pt
@@ -293,6 +292,103 @@ def collect_unimodal_scores(args, dataset_class, annotation_loader, data_file, i
     return all_labels, all_text_scores, all_image_scores
 
 
+def _write_head_metadata(dataset, model_name, seed, n_samples, best_params, roc_auc_key, roc_auc):
+    metadata_path = head_metadata_path(dataset)
+    existing = {}
+    if os.path.exists(metadata_path):
+        with open(metadata_path, encoding="utf-8") as f:
+            existing = json.load(f)
+    existing.update({
+        "split": "train",
+        "input_space": "scores",
+        "seed": seed,
+        "n_samples": int(n_samples),
+    })
+    existing.setdefault("heads", {})
+    existing["heads"][model_name] = {
+        "best_params": {k: str(v) for k, v in best_params.items()},
+        roc_auc_key: round(float(roc_auc), 4),
+    }
+
+    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(existing, indent=4, fp=f)
+        f.write("\n")
+    print(f"wrote {metadata_path}")
+
+
+def fit_svm_rbf_head(args, features, labels):
+    """Fit an SVM-RBF fusion head via cross-validated grid search."""
+    seed = args.seed
+    folds = StratifiedKFold(5, shuffle=True, random_state=seed)
+    pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf", probability=True, random_state=seed))
+    pipe.steps[1] = ("svc", pipe.steps[1][1])
+    head = GridSearchCV(
+        pipe, {"svc__C": SVM_RBF_C_GRID, "svc__gamma": SVM_RBF_GAMMA_GRID},
+        scoring="roc_auc", cv=folds, n_jobs=-1,
+    ).fit(features, labels)
+
+    path = fusion_head_path("svm-rbf", args.dataset)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    joblib.dump(head.best_estimator_, path)
+    print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
+
+    _write_head_metadata(
+        args.dataset, "svm-rbf", seed, len(labels), head.best_params_,
+        "cv_roc_auc", head.best_score_,
+    )
+    print(f"Fitted svm-rbf head. Checkpoint: {path}")
+
+
+def train_linear_fusion_head(args, features, labels):
+    """Train a Linear(2, 1) + Sigmoid fusion head by gradient descent."""
+    from sklearn.metrics import roc_auc_score
+
+    seed = args.seed
+    torch.manual_seed(seed)
+
+    X = torch.as_tensor(features, dtype=torch.float32)
+    y = torch.as_tensor(labels, dtype=torch.float32)
+    mean = X.mean(dim=0)
+    std = X.std(dim=0).clamp_min(1e-8)
+    X_std = (X - mean) / std
+
+    linear = nn.Linear(2, 1)
+    optimizer = optim.Adam(linear.parameters(), lr=LINEAR_LEARNING_RATE)
+    criterion = nn.BCEWithLogitsLoss()
+
+    for _ in range(LINEAR_EPOCHS):
+        optimizer.zero_grad()
+        logits = linear(X_std).squeeze(-1)
+        loss = criterion(logits, y)
+        loss.backward()
+        optimizer.step()
+
+    with torch.no_grad():
+        train_auc = roc_auc_score(labels, torch.sigmoid(linear(X_std).squeeze(-1)).numpy())
+
+        # Fold the standardization into the weights so the saved module takes
+        # raw [text_score, image_score] input, like the other fusion heads.
+        weight = linear.weight.data.squeeze(0) / std
+        bias = linear.bias.data.squeeze(0) - (linear.weight.data.squeeze(0) * mean / std).sum()
+
+    folded = nn.Linear(2, 1)
+    folded.weight.data = weight.unsqueeze(0)
+    folded.bias.data = bias.unsqueeze(0)
+
+    path = fusion_head_path("linear", args.dataset)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    torch.save(folded.state_dict(), path)
+    print(f"wrote {path}  train_roc_auc={train_auc:.4f}  loss={loss.item():.4f}")
+
+    _write_head_metadata(
+        args.dataset, "linear", seed, len(labels),
+        {"epochs": LINEAR_EPOCHS, "learning_rate": LINEAR_LEARNING_RATE},
+        "train_roc_auc", train_auc,
+    )
+    print(f"Fitted linear head. Checkpoint: {path}")
+
+
 def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_dir):
     """Fit an SVM-RBF or linear fusion head on unimodal scores from the training split."""
     require_unimodal_checkpoints(args.dataset)
@@ -305,56 +401,10 @@ def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_di
     n_real = int((labels == 1).sum())
     print(f"Fitting on {len(labels)} train samples ({n_fake} fake / {n_real} real)")
 
-    seed = args.seed
-    folds = StratifiedKFold(5, shuffle=True, random_state=seed)
-
     if args.model == "svm-rbf":
-        pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf", probability=True, random_state=seed))
-        pipe.steps[1] = ("svc", pipe.steps[1][1])
-        head = GridSearchCV(
-            pipe, {"svc__C": CS, "svc__gamma": ["scale", 0.01, 0.1, 1.0]},
-            scoring="roc_auc", cv=folds, n_jobs=-1,
-        ).fit(features, labels)
+        fit_svm_rbf_head(args, features, labels)
     else:
-        pipe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=5000, random_state=seed))
-        pipe.steps[1] = ("lr", pipe.steps[1][1])
-        head = GridSearchCV(
-            pipe, {"lr__C": CS}, scoring="roc_auc", cv=folds, n_jobs=-1,
-        ).fit(features, labels)
-
-    path = fusion_head_path(args.model, args.dataset)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    joblib.dump(head.best_estimator_, path)
-    print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
-
-    metadata = {
-        "split": "train",
-        "input_space": "scores",
-        "seed": seed,
-        "n_samples": int(len(labels)),
-        "heads": {
-            args.model: {
-                "best_params": {k: str(v) for k, v in head.best_params_.items()},
-                "cv_roc_auc": round(float(head.best_score_), 4),
-            },
-        },
-    }
-
-    metadata_path = head_metadata_path(args.dataset)
-    existing = {}
-    if os.path.exists(metadata_path):
-        with open(metadata_path, encoding="utf-8") as f:
-            existing = json.load(f)
-    existing.update(metadata)
-    if "heads" in existing:
-        existing["heads"].update(metadata["heads"])
-
-    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(existing, indent=4, fp=f)
-        f.write("\n")
-    print(f"wrote {metadata_path}")
-    print(f"Fitted {args.model} head. Checkpoint: {path}")
+        train_linear_fusion_head(args, features, labels)
 
 
 # ── CLI ──

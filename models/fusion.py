@@ -98,14 +98,13 @@ def model_args_from_parameters(
 
 
 def load_pytorch_head(rule: str, dataset: str | None = None, device="cpu") -> torch.nn.Module:
-    """Load a fitted sklearn head and return the equivalent PyTorch module."""
+    """Load a fitted fusion head and return the equivalent PyTorch module."""
     path = fusion_head_path(rule, dataset)
     if not os.path.exists(path):
         raise FileNotFoundError(f"No fitted {rule} head at {path}")
-    fitted = joblib.load(path)
     if rule == "svm-rbf":
-        return DifferentiableRBFSVMFusion(fitted).to(device).eval()
-    return linear_fusion_from_sklearn(fitted).to(device).eval()
+        return DifferentiableRBFSVMFusion(joblib.load(path)).to(device).eval()
+    return build_linear_fusion_module(torch.load(path, map_location="cpu")).to(device).eval()
 
 
 def pytorch_head_score(rule: str, features, dataset: str | None = None, device="cpu"):
@@ -197,33 +196,15 @@ class DifferentiableRBFSVMFusion(torch.nn.Module):
         return probability
 
 
-def linear_fusion_from_sklearn(fitted_model: Any) -> torch.nn.Module:
-    """Build a torch.nn.Sequential (StandardScaler → Linear → Sigmoid) from a fitted sklearn pipeline."""
-    estimator = getattr(fitted_model, "best_estimator_", fitted_model)
-    steps = dict(getattr(estimator, "named_steps", {}))
-    scaler = steps.get("standardscaler") or steps.get("scaler")
-    lr = steps.get("lr") or steps.get("logisticregression")
-    if lr is None:
-        raise TypeError("The linear fusion head must be a Pipeline ending in LogisticRegression")
+def build_linear_fusion_module(state_dict: dict) -> torch.nn.Module:
+    """Build a torch.nn.Sequential (Linear → Sigmoid) from a trained state dict.
 
-    classes = np.asarray(lr.classes_)
-    mean = torch.zeros(2)
-    scale = torch.ones(2)
-    if scaler is not None:
-        if getattr(scaler, "with_mean", True):
-            mean = torch.as_tensor(scaler.mean_, dtype=torch.float32)
-        if getattr(scaler, "with_std", True):
-            scale = torch.as_tensor(scaler.scale_, dtype=torch.float32)
-
-    weight = torch.as_tensor(lr.coef_[0], dtype=torch.float32) / scale
-    bias = torch.tensor(float(lr.intercept_[0]) - (lr.coef_[0] @ (mean / scale).numpy()), dtype=torch.float32)
-    if int(classes[0]) == 1:
-        weight, bias = -weight, -bias
-
+    The state dict comes from ``scripts/train_scripts/train.py``, which fits
+    this head by gradient descent (see ``training_late_fusion.linear`` in
+    config.yaml), not from a fitted sklearn estimator.
+    """
     linear = torch.nn.Linear(2, 1)
-    linear.weight.data = weight.unsqueeze(0)
-    linear.bias.data = bias.unsqueeze(0)
-
+    linear.load_state_dict(state_dict)
     return torch.nn.Sequential(linear, torch.nn.Sigmoid(), torch.nn.Flatten(0))
 
 
@@ -354,10 +335,9 @@ def build_classifier(args, device):
                 f"No fitted {args.fusion} head at {head_path}. "
                 "Run scripts/fit_fusion_heads.py first."
             )
-        fitted = joblib.load(head_path)
         fusion_head = (
-            DifferentiableRBFSVMFusion(fitted) if args.fusion == "svm-rbf"
-            else linear_fusion_from_sklearn(fitted)
+            DifferentiableRBFSVMFusion(joblib.load(head_path)) if args.fusion == "svm-rbf"
+            else build_linear_fusion_module(torch.load(head_path, map_location="cpu"))
         ).to(device)
 
     classifier = LateFusionClassifier(

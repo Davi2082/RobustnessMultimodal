@@ -55,17 +55,25 @@ dataset_configs:
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
 
 # Training parameters (neural models: text, image, feature-fusion)
-epochs: 10
-learning_rate: 1e-4
-lora_alpha: 8
-lora_r: 8
-lora_dropout: 0.4
-use_lora: true
-merge_tokens: 0
-num_workers: 0
+training_neural:
+  epochs: 10
+  learning_rate: 1e-4
+  lora_alpha: 8
+  lora_r: 8
+  lora_dropout: 0.4
+  use_lora: true
+  merge_tokens: 0
+  num_workers: 0
 
-# Late-fusion head fitting (svm-rbf, linear)
-late_fusion_input: scores  # scores or logits — feature space for the fusion heads
+# Late-fusion head fitting (svm-rbf, linear; min/max/mean are deterministic)
+training_late_fusion:
+  late_fusion_input: scores  # scores or logits — feature space for the fusion heads
+  svm-rbf:
+    c_grid: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
+    gamma_grid: [scale, 0.01, 0.1, 1.0]
+  linear:
+    epochs: 10
+    learning_rate: 1e-4
 
 # Attack parameters (for targetted attacks)
 source_label: 0  # Fake

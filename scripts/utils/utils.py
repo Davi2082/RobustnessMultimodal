@@ -495,7 +495,7 @@ def plot_score_space_fig7(
     from a fitted probabilistic RBF-SVM supplied through ``svm_model``.
 
     ``svm_model`` must be a PyTorch ``nn.Module`` (e.g.
-    ``DifferentiableRBFSVMFusion`` or ``linear_fusion_from_sklearn``).  Its two
+    ``DifferentiableRBFSVMFusion`` or ``build_linear_fusion_module``).  Its two
     input features must be ordered as ``[text, image]`` and must match
     ``svm_input``:
 
