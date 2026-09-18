@@ -41,8 +41,8 @@ def merge_attack_shards(output_dir, num_shards, csv_name="perturbed_results.csv"
     """Merge per-shard CSVs into a single result file sorted by index.
 
     Searches each shard directory recursively for CSVs named *csv_name* so that
-    scenario subdirectories (e.g. ``image-perturbed/``) are handled
-    automatically.  Also keeps the first shard's ``parameters.json`` (updating
+    any nested output structure is handled automatically.
+    Also keeps the first shard's ``parameters.json`` (updating
     runtime to the max across shards) and removes the shard subdirectories.
     """
     import json

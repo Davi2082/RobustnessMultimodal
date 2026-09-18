@@ -21,12 +21,14 @@ PGD can backpropagate through the late-fusion classifier.
 
 By default the output layout matches the existing late-fusion evaluation:
 
-    results/.../perturbed/late-fusion/<fusion>/perturbed_results.csv
-    results/.../perturbed/late-fusion/<fusion>/text-perturbed/...
-    results/.../perturbed/late-fusion/<fusion>/image-perturbed/...
+    results/<dataset>/<subset>/<seed>/perturbed/<attack>/<fusion>/
 
-The first file is the independently both-perturbed scenario. Existing files
-at those paths are replaced, consistently with the other attack scripts.
+Models are compared under a common attack, so the attack directory comes
+first and carries the perturbed modality: ``pgd`` is image-only, ``trepat``
+is text-only, and ``sum``/``interleaved``/``joint`` perturb both. Each
+invocation owns one scenario and writes a single ``perturbed_results.csv``
+there. Existing files at those paths are replaced, consistently with the
+other attack scripts.
 Every result CSV includes the fused output and the two component outputs used
 by the score-space plot.
 
@@ -100,6 +102,22 @@ def late_fusion_attack_budgets(attack_scope: str) -> dict[str, int]:
     }
 
 
+def default_attack_name(args) -> str:
+    """Attack directory name implied by the scope and optimization.
+
+    Results live in ``perturbed/<attack>/<model_or_fusion>/`` so that models
+    are compared under a common attack; the attack name therefore has to carry
+    the perturbed modality.  This mirrors the names ``run_multimodal_attacks``
+    passes via ``--output-dir``, so a direct invocation of this script lands in
+    the same directory the launcher would have used.
+    """
+    if args.attack_scope == "image":
+        return "pgd"
+    if args.attack_scope == "text":
+        return args.attack_method
+    return args.optimization
+
+
 from configuration_files.paths import (
     dataset_annotations,
     dataset_images_dir,
@@ -109,11 +127,9 @@ from configuration_files.paths import (
     model_perturbed_dir,
 )
 
-SCENARIO_FILES = {
-    "text": os.path.join("text-perturbed", "perturbed_results.csv"),
-    "image": os.path.join("image-perturbed", "perturbed_results.csv"),
-    "both": "perturbed_results.csv",
-}
+# The attack name already encodes the perturbed modality (see ATTACK_SCOPE),
+# so every scenario writes the same filename inside its own attack directory.
+RESULTS_CSV = "perturbed_results.csv"
 from attacks.attack_algorithms.text.TREPAT.modifier import Modifier
 from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
 from attacks.attack_algorithms.img.PGD.pgd import img_perturbation, project_to_epsilon_ball
@@ -782,10 +798,7 @@ def append_outputs(
 
 def scenario_paths(output_dir: Path) -> dict[str, Path]:
     """Resolve every scenario CSV path under the attack output directory."""
-    return {
-        scope: output_dir / SCENARIO_FILES[scope]
-        for scope in ("text", "image", "both")
-    }
+    return {scope: output_dir / RESULTS_CSV for scope in ("text", "image", "both")}
 
 
 def save_parameters(
@@ -947,7 +960,7 @@ def main() -> None:
     output_dir = (
         args.output_dir
         if args.output_dir is not None
-        else Path(model_perturbed_dir(args.fusion, "sum", args.dataset))
+        else Path(model_perturbed_dir(args.fusion, default_attack_name(args), args.dataset))
     )
 
     dump_dir = (

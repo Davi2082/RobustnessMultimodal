@@ -13,7 +13,7 @@ def dataset_weights_dir(dataset=None):
 # ---------------------------------------------------------------------------
 # Result layout:
 #   results/<dataset>/<subset_size>/<seed>/clean/<model_or_fusion>/
-#   results/<dataset>/<subset_size>/<seed>/perturbed/<model_or_fusion>/<attack>/
+#   results/<dataset>/<subset_size>/<seed>/perturbed/<attack>/<model_or_fusion>/
 #   results/<dataset>/<subset_size>/<seed>/ablation/<model_or_fusion>/
 # ---------------------------------------------------------------------------
 

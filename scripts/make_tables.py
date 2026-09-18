@@ -6,7 +6,6 @@ Tables
   clean       – unimodal + fusion clean performance
   adversarial – fusion methods under PGD / TREPAT / PGD+TREPAT  (delta + ASR)
   ablation    – missing-modality probing
-  subscenario – image-perturbed / text-perturbed breakdown
 
 Usage:
   source ~/miniconda3/etc/profile.d/conda.sh && conda activate multimodal
