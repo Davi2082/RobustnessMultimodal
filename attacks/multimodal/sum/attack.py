@@ -64,6 +64,7 @@ from transformers import AutoModelForMaskedLM, AutoTokenizer
 from data_loading import my_datasets
 from configuration_files.configuration import (
     ALPHA_FACTOR,
+    RANDOM_START,
     ATTACK_MODEL,
     COMMAND,
     DEVICES,
@@ -368,6 +369,12 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     attack_group.add_argument("--epsilon", type=float, default=EPSILON)
     attack_group.add_argument(
         "--alpha-factor", dest="alpha_factor", type=float, default=ALPHA_FACTOR
+    )
+    attack_group.add_argument(
+        "--random-start",
+        dest="random_start",
+        action=argparse.BooleanOptionalAction,
+        default=RANDOM_START,
     )
     attack_group.add_argument("--k", type=int, default=K_BERT_ATTACK)
     attack_group.add_argument(
@@ -701,6 +708,10 @@ class TrepatStepState:
         self.victim.image = pixel_values
         self.victim._prob_cache.clear()
 
+        if self._initialized:
+            best_visible = self.best_text[: len(self.best_text) - len(self.hidden_text)] if self.hidden_text else self.best_text
+            self.best_target_prob = self.victim.get_prob([best_visible])[0, self.target_label]
+
         if not self._initialized:
             pred = self.victim.get_pred([self.visible_text])[0]
             if pred != self.source_label:
@@ -842,6 +853,7 @@ def save_parameters(
             "TRePAT Max Variants": (args.max_variants if scenario in {"text", "both"} else None),
             "Epsilon": args.epsilon,
             "Alpha Factor": args.alpha_factor,
+            "Random Start": args.random_start,
             # The step size actually used, so a run can be checked
             # against the reported configuration without re-deriving it.
             "Alpha": (
@@ -1134,29 +1146,20 @@ def main() -> None:
                         else:
                             text_similarity = 1.0
 
-                        perturbed_text_rows.append(
-                            {
-                                "index": index,
-                                "original": clean_news["txt"],
-                                "perturbed": perturbed_text,
-                            }
-                        )
-
-                        # Alternating rounds feed the current adversarial text
-                        # forward, so the image attack of the next round sees it.
                         current_news = {"txt": perturbed_text, "img": current_news["img"]}
 
                     if image_step and args.attack_scope in {"image", "both"}:
+                        img_news = clean_news if args.optimization == "sum" else current_news
                         perturbed_image, image_ssim, round_clean_pixels = img_perturbation(
                             model,
                             tokenizer,
                             processor,
                             args,
-                            current_news,
+                            img_news,
                             torch.tensor([label], device=device),
                             steps=(None if args.optimization == "sum" else 1),
-                            random_start=(args.optimization == "sum" or step == 0),
-                            pixel_values=current_news["img"],
+                            random_start=(args.random_start and (args.optimization == "sum" or step == 0)),
+                            pixel_values=img_news["img"],
                         )
 
                         image_ssim = float(
@@ -1172,6 +1175,23 @@ def main() -> None:
                             )
 
                         current_news = {"txt": current_news["txt"], "img": perturbed_image}
+
+                    if args.optimization != "sum":
+                        with torch.inference_mode():
+                            es_text = encode_text_batch(tokenizer, [current_news["txt"]], args.n_tokens, device)
+                            es_img = encode_image_batch(processor, [current_news["img"]], device)
+                            es_score, _ = model(es_img, es_text)
+                            if int(es_score.item() > args.threshold) == target_label:
+                                break
+
+                if args.attack_scope in {"text", "both"}:
+                    perturbed_text_rows.append(
+                        {
+                            "index": index,
+                            "original": clean_news["txt"],
+                            "perturbed": perturbed_text,
+                        }
+                    )
 
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

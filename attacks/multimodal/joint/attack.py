@@ -51,6 +51,7 @@ from configuration_files.configuration import (
     MAX_CHANGE_RATIO,
     MIN_TXT_SIMILARITY,
     PGD_ITERS,
+    RANDOM_START,
     RAND_SEED,
     SOURCE_LABEL,
     build_subset_sampler,
@@ -345,7 +346,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
         default=None,
         help="PGD step size. Defaults to 2.5 * epsilon / iters.",
     )
-    parser.add_argument("--no-random-start", dest="random_start", action="store_false")
+    parser.add_argument("--random-start", dest="random_start", action=argparse.BooleanOptionalAction, default=RANDOM_START)
     parser.add_argument("--max-change-ratio", type=float, default=MAX_CHANGE_RATIO)
     parser.add_argument(
         "--candidates",

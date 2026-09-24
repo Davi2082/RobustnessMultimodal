@@ -275,7 +275,7 @@ class Modifier:
         return result
     
     def get_next_variant(self):
-        if self.variant_counter > self.max_variants:
+        if self.variant_counter >= self.max_variants:
             # print("Max variants reached, failing. ")
             return None
         else:
