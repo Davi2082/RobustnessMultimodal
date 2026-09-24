@@ -23,6 +23,7 @@ from configuration_files.configuration import (
     PGD_ITERS,
     EPSILON,
     ALPHA_FACTOR,
+    RANDOM_START,
     RAND_SEED,
     build_subset_sampler,
     dataset_balanced_subset,
@@ -68,6 +69,7 @@ def main():
     parser.add_argument("--pgd_iters", type=int, default=PGD_ITERS)
     parser.add_argument("--epsilon", type=float, default=EPSILON)
     parser.add_argument("--alpha_factor", type=float, default=ALPHA_FACTOR)
+    parser.add_argument("--random-start", dest="random_start", action=argparse.BooleanOptionalAction, default=RANDOM_START)
     parser.add_argument("--results_path", type=str, default=None)
     parser.add_argument("--experiment-name", default="pgd")
     parser.add_argument("--device", type=str, default=None,
@@ -149,6 +151,7 @@ def main():
                 per_tensor, ssim_pgd, _ = img_perturbation(
                     model, tokenizer, processor, args, news,
                     torch.tensor([label], device=device),
+                    random_start=args.random_start,
                     pixel_values=sample_raw,
                 )
             else:
@@ -190,6 +193,7 @@ def main():
         "PGD Iters": args.pgd_iters,
         "Epsilon": args.epsilon,
         "Alpha Factor": args.alpha_factor,
+        "Random Start": args.random_start,
     }
     elapsed = _time.time() - _t0
     parameters = {
