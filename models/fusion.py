@@ -303,7 +303,15 @@ class FeatureFusionClassifier(torch.nn.Module):
         logit = logit.reshape(-1, 1)
         if not return_components:
             return score, logit
-        return score, logit, score, logit, score, logit
+        # Per-modality components: the joint model fed one modality only, with
+        # the other's tokens dropped (the "drop" condition of modality_ablation).
+        text_score, text_logit = self.model(None, texts)
+        image_score, image_logit = self.model(images, None)
+        return (
+            score, logit,
+            text_score.reshape(-1, 1), text_logit.reshape(-1, 1),
+            image_score.reshape(-1, 1), image_logit.reshape(-1, 1),
+        )
 
 
 def build_classifier(args, device):
