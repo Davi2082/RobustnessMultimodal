@@ -1,0 +1,7 @@
+{
+    "Modality": "late-fusion",
+    "Fusion Mode": "linear",
+    "Threshold": 0.5,
+    "Text CSV": "results/Recovery/full/42/clean/text/results.csv",
+    "Image CSV": "results/Recovery/full/42/clean/image/results.csv"
+}
