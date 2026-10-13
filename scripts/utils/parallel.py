@@ -98,7 +98,8 @@ def merge_attack_shards(output_dir, num_shards, csv_name="perturbed_results.csv"
                 json.dump(params, f, indent=4)
 
     # Merge perturbed text dumps if present
-    text_relpaths = [p.relative_to(shard0) for p in shard0.rglob("perturbed_texts*.csv")]
+    text_relpaths = [p.relative_to(shard0) for pattern in ("perturbed_texts*.csv", "loss_log.csv")
+                     for p in shard0.rglob(pattern)]
     for relpath in text_relpaths:
         frames = []
         for sid in range(num_shards):

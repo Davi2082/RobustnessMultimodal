@@ -26,6 +26,7 @@ from configuration_files.configuration import (
     N_TOKENS,
     RAND_SEED,
     THRESHOLD,
+    method_threshold,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -46,7 +47,12 @@ def main():
     parser.add_argument("--late_fusion_mode", type=str, choices=["mean", "max", "min"])
     parser.add_argument("--text_model_path", type=str, default=None)
     parser.add_argument("--image_model_path", type=str, default=None)
-    parser.add_argument("--threshold", type=float, default=THRESHOLD)
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="Decision threshold on P(Real); default: the method's tuned threshold "
+                             "(config threshold: calibrated) or the fixed config threshold.")
+    parser.add_argument("--split", choices=["test", "val"], default="test",
+                        help="val: score the full non-augmented validation split (for threshold tuning) "
+                             "and write to results/<ds>/<subset>/<seed>/val/<modality>/")
     parser.add_argument("--name_llm", type=str, default=NAME_LLM)
     parser.add_argument("--name_img_embed", type=str, default=NAME_IMG_EMBED)
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
@@ -112,16 +118,18 @@ def main():
     parameters["Use LoRA"] = args.use_lora
     parameters["Set Params"] = args.set_params
 
-    # Threshold computation if a threshold is not provided
-    if args.threshold is None:
-        if args.modality == "late-fusion":
-            thr = compute_threshold(txt_model, processor, tokenizer, device, args, img_model, args.late_fusion_mode)
-        else:
-            thr = compute_threshold(model, processor, tokenizer, device, args)
-    else:
+    # Decision threshold: explicit, else the method's tuned (or global) threshold.
+    # Validation scoring only needs the scores; its predictions use 0.5.
+    if args.threshold is not None:
         thr = args.threshold
+    elif args.split == "val":
+        thr = THRESHOLD
+    else:
+        method = args.late_fusion_mode if args.modality == "late-fusion" else args.modality
+        thr = method_threshold(method, args.dataset)
     
     parameters["Threshold"] = thr
+    parameters["Split"] = args.split
 
     # Select dataset class and load function dynamically
     dataset_class = dataset_classes[args.dataset]
@@ -133,6 +141,10 @@ def main():
         output_dir = model_clean_dir(args.late_fusion_mode, args.dataset)
     else:
         output_dir = model_clean_dir(args.modality, args.dataset)
+    if args.split == "val":
+        from configuration_files.paths import dataset_result_root
+        output_dir = os.path.join(dataset_result_root(args.dataset), "val",
+                                  args.late_fusion_mode if args.modality == "late-fusion" else args.modality)
     os.makedirs(output_dir, exist_ok=True)
     
     # Dataset obtaination
@@ -142,12 +154,14 @@ def main():
         args.n_tokens,
         processor,
         tokenizer,
-        glob.glob(f"data/{args.dataset}/test.*")[0],
+        (sorted(f for f in glob.glob(f"data/{args.dataset}/val.*")) if args.split == "val"
+         else glob.glob(f"data/{args.dataset}/test.*"))[0],
         f"data/{args.dataset}/images",
     )
     
-    # Dataloader creation (optionally restricted to a balanced subset)
-    sampler = build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset))
+    # Dataloader creation (test: optionally a balanced subset; val: the full split)
+    sampler = (None if args.split == "val" else
+               build_subset_sampler(dataset_test, dataset_subset_size(args.dataset), dataset_balanced_subset(args.dataset)))
     if sampler is not None:
         dataloader_test = DataLoader(dataset_test, batch_size=args.batch_size, sampler=sampler)
     else:

@@ -19,15 +19,22 @@ Usage:
     python3 -m scripts.main_scripts.run_multimodal_attacks
     python3 -m scripts.main_scripts.run_multimodal_attacks --devices cuda:0 cuda:1
     python3 -m scripts.main_scripts.run_multimodal_attacks --attacks sum joint --fusions mean max
+
+Epsilon sweep (results in perturbed/<attack>_eps<k>/<fusion>/, k = eps*255, so
+the main-config results are never overwritten):
+  python3 -m scripts.main_scripts.run_multimodal_attacks --attacks pgd --epsilons 0.5/255 1/255 2/255
 """
 
 import argparse, json, os, subprocess, sys, time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from configuration_files.configuration import (
+    _number,
     ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS, PIPELINE_FUSIONS, dataset_devices,
 )
-from configuration_files.paths import clean_image_params, clean_text_params, model_perturbed_dir
+from configuration_files.paths import (
+    clean_image_params, clean_text_params, late_fusion_data_dir, model_perturbed_dir,
+)
 from models.fusion import fusion_head_path
 from scripts.utils.devices import resolve_devices
 
@@ -62,6 +69,11 @@ def result_csv_path(attack, fusion, dataset):
     return os.path.join(model_perturbed_dir(fusion, attack, dataset), "perturbed_results.csv")
 
 
+def eps_tag(eps):
+    """Directory suffix for an epsilon: 2/255 -> 'eps2', 0.5/255 -> 'eps0.5'."""
+    return f"eps{eps * 255:g}"
+
+
 def run_single_gpu(base_cmd, device, output_dir):
     """Run a single job on one GPU (no sharding)."""
     cmd = base_cmd + ["--device", device, "--device-mlm", device, "--output-dir", output_dir]
@@ -86,7 +98,11 @@ def main():
     parser.add_argument("--attacks", nargs="+", default=ATTACKS, choices=ATTACKS, metavar="A")
     parser.add_argument("--force", action="store_true",
                         help="Re-run even if results already exist.")
+    parser.add_argument("--epsilons", nargs="+", default=None, metavar="EPS",
+                        help="Sweep these image budgets (e.g. 1/255 2/255). Each run goes "
+                             "to perturbed/<attack>_eps<k>/ instead of perturbed/<attack>/.")
     args = parser.parse_args()
+    epsilons = [None] if args.epsilons is None else [_number(e) for e in args.epsilons]
 
     if args.devices is None:
         args.devices = dataset_devices(args.dataset)
@@ -94,18 +110,22 @@ def main():
     multi_gpu = len(args.devices) > 1
 
     all_jobs, skipped = [], 0
-    for attack in args.attacks:
-        for fusion in args.fusions:
-            csv = result_csv_path(attack, fusion, args.dataset)
-            if not args.force and os.path.isfile(csv):
-                skipped += 1
-                continue
-            all_jobs.append((attack, fusion))
+    for eps in epsilons:
+        for attack in args.attacks:
+            name = attack if eps is None else f"{attack}_{eps_tag(eps)}"
+            for fusion in args.fusions:
+                csv = result_csv_path(name, fusion, args.dataset)
+                if not args.force and os.path.isfile(csv):
+                    skipped += 1
+                    continue
+                all_jobs.append((attack, fusion, eps))
 
     print("=" * 70)
     print(f"MULTIMODAL ATTACKS — {args.dataset}")
     print(f"  Fusions:  {', '.join(args.fusions)}")
     print(f"  Attacks:  {', '.join(args.attacks)}")
+    if args.epsilons:
+        print(f"  Epsilons: {', '.join(args.epsilons)}")
     if multi_gpu:
         print(f"  Devices:  {', '.join(args.devices)}  (sample sharding)")
     else:
@@ -120,11 +140,17 @@ def main():
     t0 = time.time()
     done, failed = 0, 0
 
-    for i, (attack, fusion) in enumerate(all_jobs):
-        output_dir = model_perturbed_dir(fusion, attack, args.dataset)
+    for i, (attack, fusion, eps) in enumerate(all_jobs):
+        name = attack if eps is None else f"{attack}_{eps_tag(eps)}"
+        output_dir = model_perturbed_dir(fusion, name, args.dataset)
         base_cmd = build_base_cmd(attack, fusion, args.dataset)
+        if eps is not None:
+            # Separate dump dir too, so sweep samples don't overwrite the main run's.
+            dump_dir = os.path.join(late_fusion_data_dir(args.dataset), fusion,
+                                    f"{ATTACK_SCOPE[attack]}_{eps_tag(eps)}")
+            base_cmd += ["--epsilon", repr(eps), "--dump_dir", dump_dir]
 
-        print(f"\n[{i+1}/{len(all_jobs)}] {attack} × {fusion}")
+        print(f"\n[{i+1}/{len(all_jobs)}] {name} × {fusion}")
         sys.stdout.flush()
 
         if multi_gpu:
@@ -135,14 +161,14 @@ def main():
         done += 1
         if rc != 0:
             failed += 1
-            print(f"  FAILED: {attack} × {fusion}")
+            print(f"  FAILED: {name} × {fusion}")
         else:
             params_path = os.path.join(output_dir, "parameters.json")
             if os.path.isfile(params_path):
                 with open(params_path) as _f:
                     rt = json.load(_f).get("Runtime (s)", None)
                 if rt is not None:
-                    print(f"  {attack} × {fusion} — {rt:.1f}s")
+                    print(f"  {name} × {fusion} — {rt:.1f}s")
 
     elapsed = time.time() - t0
     print(f"\n{'='*70}")

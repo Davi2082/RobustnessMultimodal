@@ -20,13 +20,15 @@ import numpy as np
 import pandas as pd
 
 from configuration_files.configuration import (
-    DATASET, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, THRESHOLD,
+    DATASET, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, THRESHOLD, method_threshold,
     dataset_devices, image_weights_path,
 )
 from scripts.utils.devices import resolve_devices
 
 
-def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, dataset, threshold=THRESHOLD):
+def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, dataset, threshold=None):
+    if threshold is None:
+        threshold = method_threshold(mode, dataset)
     df_txt = pd.read_csv(text_csv)
     df_img = pd.read_csv(image_csv)
     assert len(df_txt) == len(df_img), "Text and image CSVs have different lengths"
@@ -40,16 +42,19 @@ def late_fusion_from_csvs(text_csv, image_csv, mode, output_dir, dataset, thresh
     elif mode == "max":
         scores = np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        from models.fusion import pytorch_head_score, fusion_head_path
+        from models.fusion import pytorch_head_score, fusion_head_path, head_input_space
+        from scripts.train_scripts.fusion_heads import head_features
         head_path = fusion_head_path(mode, dataset)
         if not os.path.isfile(head_path):
             print(f"  [SKIP] Fitted head not found: {head_path}")
             return
-        scores = pytorch_head_score(mode, np.column_stack([s_txt, s_img]), dataset)
+        # Learned heads take the unimodal logits (or scores, per fusion_heads.json).
+        X = head_features(df_txt, df_img, head_input_space(dataset))
+        scores = np.asarray(pytorch_head_score(mode, X, dataset)).reshape(-1)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
-    preds = (scores >= threshold).astype(int)
+    preds = (scores > threshold).astype(int)  # same rule as eval.py and the attacks
     result_df = pd.DataFrame({
         "index": df_txt["index"], "label": df_txt["label"],
         "score": scores, "pred": preds,

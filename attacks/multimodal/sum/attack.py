@@ -136,6 +136,7 @@ RESULTS_CSV = "perturbed_results.csv"
 from attacks.attack_algorithms.text.TREPAT.modifier import Modifier
 from attacks.attack_algorithms.text.TREPAT.rephraser import Rephraser
 from attacks.attack_algorithms.img.PGD.pgd import img_perturbation, project_to_epsilon_ball
+from attacks.attack_algorithms.text.TREPAT.attack import log_query
 from attacks.attack_algorithms.text.BERTATTACK.attack import bertattack as bertattack_attack
 from attacks.attack_algorithms.text.TREPAT.attack import TargetedTrepatAttacker
 from attacks.attack_algorithms.text.common import model_sbert, visible_text_window
@@ -227,8 +228,9 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     model_group.add_argument(
         "--threshold",
         type=float,
-        default=0.5,
-        help="Decision threshold applied to the fused score.",
+        default=None,
+        help="Decision threshold applied to the fused score (default: the fusion "
+        "method's threshold from config.yaml: fixed, or calibrated per method).",
     )
 
     data_group = parser.add_argument_group("data and output")
@@ -423,11 +425,19 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     if args.fusion == "svm_rbf":
         args.fusion = "svm-rbf"
 
+    if args.threshold is None:
+        from configuration_files.configuration import method_threshold
+        args.threshold = method_threshold(args.fusion, args.dataset)
+
     default_budgets = late_fusion_attack_budgets(args.attack_scope)
     if args.pgd_iters is None:
         args.pgd_iters = default_budgets["pgd_iters"]
     if args.max_variants is None:
         args.max_variants = default_budgets["max_variants"]
+
+    # PGD step size always comes from the full unimodal budget: the 'both'
+    # scope halves the number of steps, not the distance each step covers.
+    args.pgd_step_iters = PGD_ITERS
 
     # Interleaving changes the order in which the budget is spent, never its
     # size: one unit of each channel per step until both budgets are exhausted.
@@ -603,6 +613,7 @@ def fusion_trepat_attack(
     source_label: int | None = None,
     target_label: int | None = None,
     max_variants: int | None = None,
+    history: list | None = None,
 ) -> tuple[dict[str, Any], float]:
     """Attack text candidates using the fused probability as feedback.
 
@@ -631,7 +642,7 @@ def fusion_trepat_attack(
         max_variants=(args.max_variants if max_variants is None else max_variants),
     )
 
-    attacker = TargetedTrepatAttacker(modifier, source_label, target_label)
+    attacker = TargetedTrepatAttacker(modifier, source_label, target_label, history=history)
 
     perturbed_visible = attacker.attack(victim, visible_text)
 
@@ -670,7 +681,9 @@ class TrepatStepState:
         rephraser: Rephraser,
         source_label: int,
         target_label: int,
+        history: list | None = None,
     ):
+        self.history = history
         self.hidden_text: str
         self.visible_text, self.hidden_text = visible_text_window(
             news["txt"], tokenizer, args.n_tokens
@@ -726,6 +739,7 @@ class TrepatStepState:
 
         probs = self.victim.get_prob([x_new])[0]
         target_prob = probs[self.target_label]
+        log_query(self.history, self.victim, probs[1], self.source_label)
         gain = target_prob - self.best_target_prob
         self.modifier.get_feedback(gain)
 
@@ -857,7 +871,7 @@ def save_parameters(
             # The step size actually used, so a run can be checked
             # against the reported configuration without re-deriving it.
             "Alpha": (
-                args.epsilon / (args.pgd_iters * args.alpha_factor)
+                args.epsilon / (args.pgd_step_iters * args.alpha_factor)
                 if args.attack_scope in {"image", "both"}
                 else None
             ),
@@ -1010,6 +1024,8 @@ def main() -> None:
 
     perturbed_text_rows: list[dict[str, Any]] = []
 
+    loss_rows: list = []
+
     attacked_samples = 0
 
     clip_mean = torch.tensor(processor.image_mean, device=device).view(1, -1, 1, 1)
@@ -1080,6 +1096,8 @@ def main() -> None:
                 # matches the single-round run.
                 current_news = dict(clean_news)
                 clean_pixels = None
+                pgd_history: list = []
+                trepat_history: list = []
 
                 # Interleaved TrePAT: build candidates once, step through them.
                 trepat_state = None
@@ -1098,6 +1116,7 @@ def main() -> None:
                         rephraser,
                         source_label,
                         target_label,
+                        history=trepat_history,
                     )
 
                 # "sum" spends each channel's budget in a single pass against a
@@ -1122,6 +1141,7 @@ def main() -> None:
                                     source_label,
                                     target_label,
                                     None,
+                                    history=trepat_history,
                                 )
                             else:
                                 text_news, text_similarity = trepat_state.step(current_news["img"])
@@ -1160,6 +1180,7 @@ def main() -> None:
                             steps=(None if args.optimization == "sum" else 1),
                             random_start=(args.random_start and (args.optimization == "sum" or step == 0)),
                             pixel_values=img_news["img"],
+                            history=pgd_history,
                         )
 
                         image_ssim = float(
@@ -1183,6 +1204,11 @@ def main() -> None:
                             es_score, _ = model(es_img, es_text)
                             if int(es_score.item() > args.threshold) == target_label:
                                 break
+
+                for channel, hist in (("pgd", pgd_history), ("trepat", trepat_history)):
+                    for it, rec in enumerate(hist):
+                        loss_rows.append({"index": index, "label": label, "channel": channel,
+                                          "iteration": it, "loss": rec["loss"], "score": rec["score"]})
 
                 if args.attack_scope in {"text", "both"}:
                     perturbed_text_rows.append(
@@ -1275,6 +1301,15 @@ def main() -> None:
 
     if perturbed_text_rows:
         save_perturbed_texts(str(dump_dir), perturbed_text_rows)
+
+    # Per-iteration loss log (PGD steps and TREPAT queries): the CE loss on the
+    # logits [threshold, P(Real)] for the true label (maximised) and the fused score.
+    import pandas as pd
+    for scenario in sorted(requested_scenarios):
+        log_path = paths[scenario].parent / "loss_log.csv"
+        pd.DataFrame(loss_rows, columns=["index", "label", "channel", "iteration", "loss", "score"]
+                     ).to_csv(log_path, index=False)
+        print(f"Saved {log_path}")
 
     mode_desc = "targeted (fake→real)" if args.targeted else "untargeted (all clean-correct)"
     print(

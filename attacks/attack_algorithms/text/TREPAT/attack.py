@@ -14,11 +14,26 @@ from attacks.attack_algorithms.text.common import model_sbert, visible_text_wind
 from configuration_files.configuration import MAX_VARIANTS
 
 
+def threshold_ce(score, threshold, label):
+    """CE loss of the two-class logits [t, p] for the true label: the quantity
+    PGD maximises (pgd.py), so PGD and TREPAT losses are comparable."""
+    import math
+    z = (score - threshold) if label == 1 else (threshold - score)
+    return math.log1p(math.exp(-z))
+
+
+def log_query(history, victim, score, label):
+    if history is not None:
+        t = float(getattr(victim.args, "threshold", 0.5))
+        history.append({"loss": threshold_ce(float(score), t, label), "score": float(score)})
+
+
 class TargetedTrepatAttacker:
-    def __init__(self, modifier, source_label, target_label):
+    def __init__(self, modifier, source_label, target_label, history=None):
         self.modifier = modifier
         self.source_label = source_label
         self.target_label = target_label
+        self.history = history  # optional list: one {loss, score} per queried variant
 
     def attack(self, victim, input_text):
         pred_old = victim.get_pred([input_text])[0]
@@ -40,6 +55,7 @@ class TargetedTrepatAttacker:
 
             probs = victim.get_prob([x_new])[0]
             target_prob = probs[self.target_label]
+            log_query(self.history, victim, probs[1], self.source_label)
 
             gain = target_prob - old_target_prob
             self.modifier.get_feedback(gain)
@@ -132,7 +148,7 @@ class TrepatThemisVictim:
 
 
 def trepat_attack(model, themis_tokenizer, processor, args, news, label, device, rephraser,
-                  source_label=None, target_label=None):
+                  source_label=None, target_label=None, history=None):
     """TREPAT text attack.
 
     Pass ``source_label=label``, ``target_label=1 - label`` for an untargeted
@@ -148,7 +164,7 @@ def trepat_attack(model, themis_tokenizer, processor, args, news, label, device,
 
     victim = TrepatThemisVictim(model, themis_tokenizer, processor, args, device, image=news["img"])
     modifier = Modifier(rephraser, splitter="cascade", weak=False, max_variants=MAX_VARIANTS)
-    attacker = TargetedTrepatAttacker(modifier, source_label, target_label)
+    attacker = TargetedTrepatAttacker(modifier, source_label, target_label, history=history)
 
     corr_visible = attacker.attack(victim, visible_news["txt"])
 

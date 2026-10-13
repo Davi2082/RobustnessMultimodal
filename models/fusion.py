@@ -180,7 +180,7 @@ class DifferentiableRBFSVMFusion(torch.nn.Module):
         self.register_buffer("prob_b",
                              torch.tensor(float(svc.probB_[0]), dtype=torch.float32))
 
-        # libSVM's sigmoid outputs P(class_0); invert when class 1 is second.
+        # forward() returns P(classes_[1]); invert when class 1 is classes_[0].
         self.invert_probability = svc.classes_[0] == 1
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
@@ -190,7 +190,11 @@ class DifferentiableRBFSVMFusion(torch.nn.Module):
         squared_distance = (transformed.unsqueeze(1) - self.support_vectors.unsqueeze(0)).square().sum(dim=-1)
         kernel = torch.exp(-self.gamma * squared_distance)
         decision = kernel.matmul(self.dual_coef) + self.intercept
-        probability = torch.sigmoid(-(self.prob_a * decision + self.prob_b))
+        # sklearn's binary decision_function is libSVM's with the sign flipped
+        # (positive = classes_[1]), so libSVM's Platt sigmoid
+        # P(classes_[0]) = 1 / (1 + exp(A * f_libsvm + B)) gives, with f_libsvm = -decision,
+        # P(classes_[1]) = sigmoid(-A * decision + B)  (matches SVC.predict_proba).
+        probability = torch.sigmoid(-self.prob_a * decision + self.prob_b)
         if self.invert_probability:
             probability = 1.0 - probability
         return probability

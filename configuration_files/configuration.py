@@ -118,7 +118,35 @@ NUM_WORKERS = _TRAINING_NEURAL["num_workers"]
 # Model parameters
 BATCH_SIZE = _CFG["batch_size"]
 N_TOKENS = _CFG["n_tokens"]
-THRESHOLD = _CFG["threshold"]
+# threshold: a number, or "calibrated" (per-method, from thresholds.json).
+THRESHOLD_CALIBRATED = str(_CFG["threshold"]).strip().lower() == "calibrated"
+# Fixed threshold; 0.5 when calibrated (only for scripts that take no method).
+THRESHOLD = 0.5 if THRESHOLD_CALIBRATED else float(_CFG["threshold"])
+THRESHOLD_FPR = float(_CFG.get("threshold_fpr", 0.05))
+
+
+def thresholds_path(dataset=None):
+    """checkpoints/<dataset>/thresholds.json (per-method tuned thresholds)."""
+    return str(Path(__file__).resolve().parents[1] / "checkpoints" / (dataset or DATASET) / "thresholds.json")
+
+
+def method_threshold(method, dataset=None):
+    """Decision threshold on P(Real) for one method (text, image, feature-fusion,
+    min, mean, max, svm-rbf, linear): the fixed ``threshold`` of config.yaml,
+    or with ``threshold: calibrated`` the method's validation-tuned threshold
+    from checkpoints/<dataset>/thresholds.json."""
+    if not THRESHOLD_CALIBRATED:
+        return THRESHOLD
+    import json
+    path = thresholds_path(dataset)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"{path} not found: run python3 -m scripts.main_scripts.compute_thresholds --dataset {dataset}")
+    with open(path) as f:
+        table = json.load(f)["thresholds"]
+    if method not in table:
+        raise KeyError(f"No tuned threshold for {method!r} in {path}")
+    return float(table[method]["threshold"])
 
 # Per-dataset subset settings (None = full dataset)
 def dataset_subset_size(dataset=None):
@@ -136,6 +164,7 @@ TARGET_LABEL = _CFG["target_label"]  # Real
 PGD_ITERS = _CFG["pgd_iters"]  # 50 steps
 EPSILON = _number(_CFG["epsilon"])  # eps = 16/255
 ALPHA_FACTOR = _number(_CFG["alpha_factor"])  # alpha = eps/(iters*factor) = 0.8/255, the paper's step size
+RANDOM_START = bool(_CFG.get("random_start", False))  # PGD uniform init within the eps-ball
 ## TrePat attack parameters (matched to Przybyła et al. 2025, arXiv:2410.20940 final-evaluation config)
 ATTACK_MODEL = _CFG["attack_model"]  # meta-llama/Llama-3.2-3B-Instruct, as reported in the paper.
                         # TrePat's own paper used OLMo; switching rewriters changes
@@ -206,7 +235,8 @@ def build_subset_sampler(dataset, subset_size, balanced=None):
 # Late-fusion head fitting
 _TRAINING_LF = _CFG["training_late_fusion"]
 LATE_FUSION_INPUT = _TRAINING_LF["late_fusion_input"]
-SVM_RBF_C_GRID = _TRAINING_LF["svm-rbf"]["c_grid"]
-SVM_RBF_GAMMA_GRID = _TRAINING_LF["svm-rbf"]["gamma_grid"]
-LINEAR_EPOCHS = _TRAINING_LF["linear"]["epochs"]
+SVM_RBF_C = float(_TRAINING_LF["svm-rbf"]["C"])
+SVM_RBF_GAMMA = _TRAINING_LF["svm-rbf"]["gamma"]  # float or "scale"
+LINEAR_EPOCHS = int(_TRAINING_LF["linear"]["epochs"])
 LINEAR_LEARNING_RATE = _number(_TRAINING_LF["linear"]["learning_rate"])
+HEAD_CV_FOLDS = int(_TRAINING_LF["cv_folds"])

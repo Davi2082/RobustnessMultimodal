@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-from configuration_files.configuration import DATASET, THRESHOLD, dataset_devices
+from configuration_files.configuration import DATASET, dataset_devices, method_threshold
 from scripts.utils.devices import resolve_devices
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
@@ -42,24 +42,38 @@ def fuse_scores(s_txt, s_img, mode, dataset):
     elif mode == "max":
         return np.maximum(s_txt, s_img)
     elif mode in ("svm-rbf", "linear"):
-        from models.fusion import pytorch_head_score, fusion_head_path
+        from models.fusion import pytorch_head_score, fusion_head_path, head_input_space
         if not os.path.isfile(fusion_head_path(mode, dataset)):
             return None
-        X = np.column_stack([s_txt, s_img])
-        return pytorch_head_score(mode, X, dataset)
+        X = np.column_stack([s_txt, s_img]).astype(float)
+        if head_input_space(dataset) == "logits":
+            # Missing modality = score 0.5 = logit 0.
+            X = np.clip(X, 1e-7, 1 - 1e-7)
+            X = np.log(X / (1 - X))
+        return np.asarray(pytorch_head_score(mode, X, dataset)).reshape(-1)
     else:
         raise ValueError(f"Unknown fusion mode: {mode}")
 
 
-def compute_metrics(y_true, scores, threshold=THRESHOLD):
-    """AUC, F1, Acc with Fake (label=0) as positive class."""
-    y_inv = 1 - y_true
-    s_inv = 1 - scores
-    y_pred = (s_inv > threshold).astype(int)
-    auc = roc_auc_score(y_inv, s_inv)
-    f1 = f1_score(y_inv, y_pred)
-    acc = accuracy_score(y_inv, y_pred)
-    return auc, f1, acc
+def compute_metrics(y_true, scores, threshold):
+    """AUC, F1, Acc, TPR, FPR with Real (label 1) as the positive class, at the
+    method's own threshold (the same one used everywhere in the experiment)."""
+    y_pred = (scores > threshold).astype(int)
+    return {
+        "AUC": roc_auc_score(y_true, scores),
+        "F1": f1_score(y_true, y_pred),
+        "Acc": accuracy_score(y_true, y_pred),
+        "TPR": float(np.mean(y_pred[y_true == 1] == 1)),
+        "FPR": float(np.mean(y_pred[y_true == 0] == 1)),
+    }
+
+
+def ablation_row(method, condition, m, base=None):
+    """One results row; deltas are taken against the both-modalities row."""
+    row = {"method": method, "condition": condition, **{k: round(v, 3) for k, v in m.items()}}
+    if base is not None:
+        row.update({f"d{k}": round(v - base[k], 3) for k, v in m.items()})
+    return row
 
 
 def late_fusion_ablation(text_csv, image_csv, output_dir, dataset):
@@ -80,24 +94,11 @@ def late_fusion_ablation(text_csv, image_csv, output_dir, dataset):
             print(f"  [SKIP] {mode} — fitted head not found")
             continue
 
-        auc_b, f1_b, acc_b = compute_metrics(labels, both)
-        auc_i, f1_i, acc_i = compute_metrics(labels, img_only)
-        auc_t, f1_t, acc_t = compute_metrics(labels, txt_only)
-
-        rows.append({
-            "method": mode, "condition": "both",
-            "AUC": round(auc_b, 3), "F1": round(f1_b, 3), "Acc": round(acc_b, 3),
-        })
-        rows.append({
-            "method": mode, "condition": "image_only",
-            "AUC": round(auc_i, 3), "F1": round(f1_i, 3), "Acc": round(acc_i, 3),
-            "dAUC": round(auc_i - auc_b, 3), "dF1": round(f1_i - f1_b, 3), "dAcc": round(acc_i - acc_b, 3),
-        })
-        rows.append({
-            "method": mode, "condition": "text_only",
-            "AUC": round(auc_t, 3), "F1": round(f1_t, 3), "Acc": round(acc_t, 3),
-            "dAUC": round(auc_t - auc_b, 3), "dF1": round(f1_t - f1_b, 3), "dAcc": round(acc_t - acc_b, 3),
-        })
+        t = method_threshold(mode, dataset)
+        m_both = compute_metrics(labels, both, t)
+        rows.append(ablation_row(mode, "both", m_both))
+        rows.append(ablation_row(mode, "image_only", compute_metrics(labels, img_only, t), m_both))
+        rows.append(ablation_row(mode, "text_only", compute_metrics(labels, txt_only, t), m_both))
 
     df = pd.DataFrame(rows)
     os.makedirs(output_dir, exist_ok=True)

@@ -2,6 +2,7 @@ import sys
 import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+import pandas as pd
 import torch
 import json
 import glob
@@ -18,6 +19,7 @@ from scripts.utils.utils import (
     save_predictions,
 )
 from configuration_files.configuration import (
+    DATASET,
     SOURCE_LABEL,
     TARGET_LABEL,
     PGD_ITERS,
@@ -30,7 +32,7 @@ from configuration_files.configuration import (
     dataset_subset_size,
     dataset_devices,
 )
-from configuration_files.paths import CLEAN_IMAGE_PARAMS, model_perturbed_dir
+from configuration_files.paths import clean_image_params, model_perturbed_dir
 from data_loading import my_datasets
 
 # Main evaluation function
@@ -39,10 +41,13 @@ def main():
     _t0 = _time.time()
     dataset_classes, load_functions = load_available_datasets()
     # "Parameters" contains information about the model that would be attacked
+    # --dataset is parsed first so the default parameters file is that
+    # dataset's, not the first one listed in config.yaml.
     parameter_parser = argparse.ArgumentParser(add_help=False)
-    parameter_parser.add_argument("--parameters-path", default=CLEAN_IMAGE_PARAMS)
+    parameter_parser.add_argument("--dataset", type=str, default=DATASET)
+    parameter_parser.add_argument("--parameters-path", default=None)
     parameter_args, _ = parameter_parser.parse_known_args()
-    parameters_path = parameter_args.parameters_path
+    parameters_path = parameter_args.parameters_path or clean_image_params(parameter_args.dataset)
     with open(parameters_path, 'r', encoding='utf-8') as f:
         parameters = json.load(f)
         
@@ -60,7 +65,6 @@ def main():
     parser.add_argument("--lora_r", type=int, default=parameters["LoRA R"])
     parser.add_argument("--lora_dropout", type=float, default=parameters["LoRA Dropout"])
     parser.add_argument("--use_lora", type=bool, default=parameters["Use LoRA"])
-    parser.add_argument("--dataset", type=str, default=parameters["Dataset"])
     parser.add_argument("--set_params", type=bool, default=False)
     parser.add_argument("--targeted", action="store_true",
                         help="Attack only source-label samples; default is untargeted.")
@@ -94,6 +98,7 @@ def main():
     # Results dir setup — results/<dataset>/image/perturbed/<attack>/
     output_dir = args.output_dir or model_perturbed_dir("image", args.experiment_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
+    loss_rows = []
 
     # Dataset obtaination
     dataset_test = my_datasets.get_dataset(
@@ -148,12 +153,17 @@ def main():
                 should_attack = True
 
             if should_attack:
+                pgd_history = []
                 per_tensor, ssim_pgd, _ = img_perturbation(
                     model, tokenizer, processor, args, news,
                     torch.tensor([label], device=device),
                     random_start=args.random_start,
                     pixel_values=sample_raw,
+                    history=pgd_history,
                 )
+                for it, rec in enumerate(pgd_history):
+                    loss_rows.append({"index": int(indices[i].item()), "label": label, "channel": "pgd",
+                                      "iteration": it, "loss": rec["loss"], "score": rec["score"]})
             else:
                 per_tensor = sample_raw
 
@@ -184,6 +194,8 @@ def main():
     # ---------- RESULTS ----------
     # Save results
     save_predictions(y_true, y_preds, scores, logits, indices, os.path.join(output_dir, "perturbed_results.csv"))
+    pd.DataFrame(loss_rows, columns=["index", "label", "channel", "iteration", "loss", "score"]
+                 ).to_csv(os.path.join(output_dir, "loss_log.csv"), index=False)
     
     # Save "Parameters" in a file
     attack_parameters = {

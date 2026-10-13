@@ -1,8 +1,9 @@
 """Train a text, image, feature-fusion, or late-fusion (svm-rbf/linear) classifier.
 
 Neural models (text, image, feature-fusion) are trained via backpropagation.
-Learned fusion heads (svm-rbf, linear) are fitted on unimodal scores from the
-training split and require existing text + image checkpoints.
+Learned fusion heads (svm-rbf, linear) are fitted on the unimodal logits of the
+held-out validation split (scored by scripts.main_scripts.compute_thresholds),
+not on train, which the unimodal models memorise.
 
 Usage:
     python3 -m scripts.train_scripts.train --model text --dataset Recovery
@@ -15,35 +16,26 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
-import joblib
-import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.svm import SVC
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from configuration_files.configuration import (
-    BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE, LINEAR_EPOCHS,
-    LINEAR_LEARNING_RATE, LORA_ALPHA, LORA_DROPOUT, LORA_R, MERGE_TOKENS,
-    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED,
-    SVM_RBF_C_GRID, SVM_RBF_GAMMA_GRID, USE_LORA,
+    BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE,
+    LORA_ALPHA, LORA_DROPOUT, LORA_R, MERGE_TOKENS,
+    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED, USE_LORA,
     dataset_devices, ff_weights_path, image_weights_path, text_weights_path,
 )
 from configuration_files.paths import dataset_weights_dir
 from data_loading import my_datasets
-from models.fusion import fusion_head_path, head_metadata_path
+from models.fusion import fusion_head_path
 from models.themis_model import get_Themis
-from scripts.utils.utils import load_available_datasets, load_model
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = ROOT / "data"
@@ -245,166 +237,12 @@ def require_unimodal_checkpoints(dataset):
         )
 
 
-def collect_unimodal_scores(args, dataset_class, annotation_loader, data_file, image_dir, split_name="train"):
-    """Run both unimodal models on a data split to collect posterior scores."""
-    device = torch.device(args.devices[0])
-    dataset_classes, load_functions = load_available_datasets()
-
-    all_labels, all_text_scores, all_image_scores = None, None, None
-
-    unimodal_paths = {"text": text_weights_path(args.dataset), "image": image_weights_path(args.dataset)}
-    for modality in ("text", "image"):
-        encoder = "openai/" + os.path.basename(unimodal_paths[modality]).split("_")[0]
-        ns = argparse.Namespace(
-            modality=modality, name_llm=args.name_llm, name_img_embed=encoder,
-            model_path=unimodal_paths[modality], n_tokens=args.n_tokens, merge_tokens=0,
-            lora_alpha=8, lora_r=8, lora_dropout=0.4, use_lora=True, set_params=True,
-        )
-        model, tokenizer, processor = load_model(device, ns)
-        model.eval()
-
-        dataset = my_datasets.get_dataset(
-            dataset_class, annotation_loader, args.n_tokens,
-            processor, tokenizer, str(data_file), str(image_dir),
-        )
-        loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
-
-        scores_list, labels_list = [], []
-        with torch.no_grad():
-            for images, labels, texts, _, _ in tqdm(loader, desc=f"{split_name}/{modality}"):
-                images, texts = images.to(device), texts.to(device)
-                if modality == "text":
-                    batch_scores, _ = model(images=None, texts=texts)
-                else:
-                    batch_scores, _ = model(images=images, texts=None)
-                scores_list.append(batch_scores.detach().cpu().flatten())
-                labels_list.append(labels)
-
-        if modality == "text":
-            all_text_scores = torch.cat(scores_list).numpy()
-            all_labels = torch.cat(labels_list).numpy()
-        else:
-            all_image_scores = torch.cat(scores_list).numpy()
-
-        del model
-        torch.cuda.empty_cache()
-
-    return all_labels, all_text_scores, all_image_scores
-
-
-def _write_head_metadata(dataset, model_name, seed, n_samples, best_params, roc_auc_key, roc_auc):
-    metadata_path = head_metadata_path(dataset)
-    existing = {}
-    if os.path.exists(metadata_path):
-        with open(metadata_path, encoding="utf-8") as f:
-            existing = json.load(f)
-    existing.update({
-        "split": "train",
-        "input_space": "scores",
-        "seed": seed,
-        "n_samples": int(n_samples),
-    })
-    existing.setdefault("heads", {})
-    existing["heads"][model_name] = {
-        "best_params": {k: str(v) for k, v in best_params.items()},
-        roc_auc_key: round(float(roc_auc), 4),
-    }
-
-    os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(existing, indent=4, fp=f)
-        f.write("\n")
-    print(f"wrote {metadata_path}")
-
-
-def fit_svm_rbf_head(args, features, labels):
-    """Fit an SVM-RBF fusion head via cross-validated grid search."""
-    seed = args.seed
-    folds = StratifiedKFold(5, shuffle=True, random_state=seed)
-    pipe = make_pipeline(StandardScaler(), SVC(kernel="rbf", probability=True, random_state=seed))
-    pipe.steps[1] = ("svc", pipe.steps[1][1])
-    head = GridSearchCV(
-        pipe, {"svc__C": SVM_RBF_C_GRID, "svc__gamma": SVM_RBF_GAMMA_GRID},
-        scoring="roc_auc", cv=folds, n_jobs=-1,
-    ).fit(features, labels)
-
-    path = fusion_head_path("svm-rbf", args.dataset)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    joblib.dump(head.best_estimator_, path)
-    print(f"wrote {path}  cv_roc_auc={head.best_score_:.4f}  {head.best_params_}")
-
-    _write_head_metadata(
-        args.dataset, "svm-rbf", seed, len(labels), head.best_params_,
-        "cv_roc_auc", head.best_score_,
-    )
-    print(f"Fitted svm-rbf head. Checkpoint: {path}")
-
-
-def train_linear_fusion_head(args, features, labels):
-    """Train a Linear(2, 1) + Sigmoid fusion head by gradient descent."""
-    from sklearn.metrics import roc_auc_score
-
-    seed = args.seed
-    torch.manual_seed(seed)
-
-    X = torch.as_tensor(features, dtype=torch.float32)
-    y = torch.as_tensor(labels, dtype=torch.float32)
-    mean = X.mean(dim=0)
-    std = X.std(dim=0).clamp_min(1e-8)
-    X_std = (X - mean) / std
-
-    linear = nn.Linear(2, 1)
-    optimizer = optim.Adam(linear.parameters(), lr=LINEAR_LEARNING_RATE)
-    criterion = nn.BCEWithLogitsLoss()
-
-    for _ in range(LINEAR_EPOCHS):
-        optimizer.zero_grad()
-        logits = linear(X_std).squeeze(-1)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        train_auc = roc_auc_score(labels, torch.sigmoid(linear(X_std).squeeze(-1)).numpy())
-
-        # Fold the standardization into the weights so the saved module takes
-        # raw [text_score, image_score] input, like the other fusion heads.
-        weight = linear.weight.data.squeeze(0) / std
-        bias = linear.bias.data.squeeze(0) - (linear.weight.data.squeeze(0) * mean / std).sum()
-
-    folded = nn.Linear(2, 1)
-    folded.weight.data = weight.unsqueeze(0)
-    folded.bias.data = bias.unsqueeze(0)
-
-    path = fusion_head_path("linear", args.dataset)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    torch.save(folded.state_dict(), path)
-    print(f"wrote {path}  train_roc_auc={train_auc:.4f}  loss={loss.item():.4f}")
-
-    _write_head_metadata(
-        args.dataset, "linear", seed, len(labels),
-        {"epochs": LINEAR_EPOCHS, "learning_rate": LINEAR_LEARNING_RATE},
-        "train_roc_auc", train_auc,
-    )
-    print(f"Fitted linear head. Checkpoint: {path}")
-
-
-def fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_dir):
-    """Fit an SVM-RBF or linear fusion head on unimodal scores from the training split."""
+def fit_fusion_head(args):
+    """Fit an SVM-RBF or linear fusion head on the validation-split unimodal outputs
+    (see scripts/train_scripts/fusion_heads.py)."""
     require_unimodal_checkpoints(args.dataset)
-
-    labels, text_scores, image_scores = collect_unimodal_scores(
-        args, dataset_class, annotation_loader, train_file, image_dir, split_name="train",
-    )
-    features = np.column_stack([text_scores, image_scores])
-    n_fake = int((labels == 0).sum())
-    n_real = int((labels == 1).sum())
-    print(f"Fitting on {len(labels)} train samples ({n_fake} fake / {n_real} real)")
-
-    if args.model == "svm-rbf":
-        fit_svm_rbf_head(args, features, labels)
-    else:
-        train_linear_fusion_head(args, features, labels)
+    from scripts.train_scripts.fusion_heads import fit_and_save
+    fit_and_save(args.model, args.dataset, args.seed)
 
 
 # ── CLI ──
@@ -471,7 +309,7 @@ def train_one(args, model_name, dataset_class, annotation_loader, train_file, va
     if model_name in NEURAL_MODELS:
         train_neural(args, dataset_class, annotation_loader, train_file, val_file, image_dir)
     else:
-        fit_fusion_head(args, dataset_class, annotation_loader, train_file, image_dir)
+        fit_fusion_head(args)
 
 
 def main():

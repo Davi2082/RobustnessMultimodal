@@ -18,3 +18,7 @@ git+https://gitlab.clarin-pl.eu/syntactic-tools/lambo.git
 OpenAttack
 sentencepiece
 protobuf
+
+ollama
+torch==2.1.2
+torchvision==0.16.2

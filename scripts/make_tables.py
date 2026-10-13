@@ -252,8 +252,8 @@ def print_ablation_table(dataset):
             auc_val = abl_m.get("auc") or abl_m.get("AUC")
             f1_val = abl_m.get("f1") or abl_m.get("F1")
             acc_val = abl_m.get("accuracy") or abl_m.get("Acc") or abl_m.get("acc")
-            # Ablation CSVs don't have per-sample predictions, so no per-class acc
-            print(f"  {sc_col:<14s} {name:<18s} {f(auc_val)} {f(f1_val)} {f(acc_val)} {'---':>7s} {'---':>7s}")
+            tpr_val, tnr_val = abl_m.get("TPR"), abl_m.get("TNR")  # absent in older CSVs
+            print(f"  {sc_col:<14s} {name:<18s} {f(auc_val)} {f(f1_val)} {f(acc_val)} {f(tpr_val)} {f(tnr_val)}")
 
         print(f"  {separator(w)}")
     print()

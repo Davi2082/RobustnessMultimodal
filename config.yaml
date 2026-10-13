@@ -7,13 +7,13 @@
 overwrite: 1
 rand_seed: 42
 
-train_pipeline: 1
-clean_pipeline: 1
-ablation_pipeline: 1
+train_pipeline: 0
+clean_pipeline: 0
+ablation_pipeline: 0
 adversarial_pipeline: 1
 
 datasets:
-  # - Recovery
+  - Recovery
   - Fakeddit
 
 pipeline_fusion_modes: [feature-fusion, min, mean, max, svm-rbf, linear] # Full list: [feature-fusion, min, mean, max, svm-rbf, linear]
@@ -32,7 +32,14 @@ name_llm: TinyLlama/TinyLlama-1.1B-Chat-v1.0
 name_img_embed: openai/clip-vit-base-patch32
 batch_size: 128
 n_tokens: 256
-threshold: 0.5
+# Decision threshold on P(Real) (predict Real iff score > threshold):
+#   a number, e.g. 0.5, used by every method; or
+#   calibrated: one threshold per method, tuned on the validation split (ROC on
+#     both classes, Real = positive) so that FPR = share of Fake predicted Real
+#     <= threshold_fpr; stored in checkpoints/<ds>/thresholds.json, written by
+#     scripts/main_scripts/compute_thresholds.py.
+threshold: calibrated
+threshold_fpr: 0.10
 
 # Per-dataset settings: CUDA devices + checkpoint filenames (relative to
 # checkpoints/<dataset>/).
@@ -40,14 +47,14 @@ dataset_configs:
   Recovery:
     devices: [cuda:1]  # multiple GPUs shard attack samples for parallel speedup
     device_mlm: cuda:1  # fallback for standalone unimodal text attack (ignored when sharding)
-    subset_size: null   # null = full dataset (283 test samples)
+    subset_size: 200   # null = full dataset (283 test samples)
     balanced_subset: true # only used when subset_size is not null
     text_checkpoint: clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt
     image_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_img_only.pt
     ff_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best.pt
   Fakeddit:
-    devices: [cuda:1]
-    device_mlm: cuda:1
+    devices: [cuda:1, cuda:2]
+    device_mlm: cuda:2
     subset_size: 200    # balanced across classes when balanced_subset is true
     balanced_subset: true
     text_checkpoint: clip-vit-base-patch32_None_8_8_0.4_True10_best_txt_only.pt
@@ -65,15 +72,22 @@ training_neural:
   merge_tokens: 0
   num_workers: 0
 
-# Late-fusion head fitting (svm-rbf, linear; min/max/mean are deterministic)
+# Late-fusion head fitting (svm-rbf, linear; min/max/mean are deterministic and
+# always act on the unimodal scores). The learned heads are fitted on the
+# held-out validation split (the unimodal models memorise train), on the
+# unimodal logits, standardized. Their thresholds are tuned on out-of-fold
+# validation scores (cv_folds stratified folds); the deployed head is then
+# refit on the whole validation split.
 training_late_fusion:
-  late_fusion_input: scores  # scores or logits — feature space for the fusion heads
-  svm-rbf:
-    c_grid: [0.01, 0.1, 1.0, 10.0, 100.0, 1000.0]
-    gamma_grid: [scale, 0.01, 0.1, 1.0]
-  linear:
-    epochs: 10
-    learning_rate: 1e-4
+  late_fusion_input: logits  # scores or logits — feature space for the learned heads
+  cv_folds: 5
+  svm-rbf:  # fixed hyperparameters, no cross-validation
+    C: 1.0
+    gamma: 0.1
+  linear:  # Linear(2, 1) trained with cross-entropy (Adam, mini-batches of batch_size);
+    # 50 epochs at 1e-2 converge on the 1,000 validation samples (10 at 1e-4 do not)
+    epochs: 50
+    learning_rate: 1e-2
 
 # Attack parameters (for targetted attacks)
 source_label: 0  # Fake
@@ -81,8 +95,8 @@ target_label: 1  # Real
 
 # Image attack parameters
 pgd_iters: 10 # 50
-epsilon: 8/255 # 16/255
-alpha_factor: 0.4 # 0.01 # step size = epsilon / (pgd_iters * alpha_factor)
+epsilon: 1/255 # 4/255
+alpha_factor: 0.4 # 0.4 # step size = epsilon / (pgd_iters * alpha_factor)
 random_start: false
 
 # TrePat attack parameters (matched to paper's final-evaluation config)

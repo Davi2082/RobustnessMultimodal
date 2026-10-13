@@ -97,11 +97,21 @@ def ff_logits(model, images, texts, ablate=None, mode="blank"):
 
 
 def metrics(y, score, thr):
-    """Fake (label 0) is the positive class, matching the rest of the pipeline."""
+    """Fake (label 0) is the positive class, matching the rest of the pipeline.
+
+    TPR/TNR follow make_tables.py: TPR = accuracy on Real (label 1),
+    TNR = accuracy on Fake (label 0).
+    """
     y_true = 1 - y
     sc = 1 - score
     y_pred = (sc > thr).astype(int)
-    return roc_auc_score(y_true, sc), f1_score(y_true, y_pred), accuracy_score(y_true, y_pred)
+    return {
+        "AUC": roc_auc_score(y_true, sc),
+        "F1": f1_score(y_true, y_pred),
+        "Acc": accuracy_score(y_true, y_pred),
+        "TPR": float((y_pred[y == 1] == 0).mean()),
+        "TNR": float((y_pred[y == 0] == 1).mean()),
+    }
 
 
 def main():
@@ -195,21 +205,19 @@ def main():
     condition_map = {"both": "both", "img_only": "image_only", "txt_only": "text_only"}
     summary = []
     for mode in ("blank", "drop"):
-        base_auc = base_f1 = base_acc = None
+        base = None
         for name, _ in conditions:
-            auc, f1, acc = metrics(label, df[f"{mode}_score_{name}"].values, args.threshold)
+            m = metrics(label, df[f"{mode}_score_{name}"].values, args.threshold)
             cond = condition_map[name]
             row = {
                 "method": f"{args.modality} ({mode})",
                 "condition": cond,
-                "AUC": round(auc, 3), "F1": round(f1, 3), "Acc": round(acc, 3),
+                **{k: round(v, 3) for k, v in m.items()},
             }
             if cond == "both":
-                base_auc, base_f1, base_acc = auc, f1, acc
+                base = m
             else:
-                row["dAUC"] = round(auc - base_auc, 3)
-                row["dF1"] = round(f1 - base_f1, 3)
-                row["dAcc"] = round(acc - base_acc, 3)
+                row.update({f"d{k}": round(v - base[k], 3) for k, v in m.items()})
             summary.append(row)
     summary = pd.DataFrame(summary)
     summary.to_csv(os.path.join(output_dir, f"{stem}_metrics.csv"), index=False)
