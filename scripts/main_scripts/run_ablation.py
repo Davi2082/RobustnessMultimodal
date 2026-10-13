@@ -3,8 +3,10 @@
 Measures what each fusion method predicts when one input modality is removed:
 
   1. Feature-fusion ablation   (scripts/modality_ablation.py — blank + drop)
-  2. Late-fusion ablation      (post-hoc: set the missing modality's score to 0.5
-                                and apply min / mean / max / svm-rbf / linear)
+  2. Late-fusion ablation      (post-hoc: set the missing modality's score to
+                                its unimodal classifier's calibrated threshold, its
+                                decision point, and apply min / mean / max /
+                                svm-rbf / linear)
 
 Usage:
     python3 -m scripts.main_scripts.run_ablation --dataset Recovery --device cuda:0
@@ -23,7 +25,12 @@ from configuration_files.configuration import DATASET, dataset_devices, method_t
 from scripts.utils.devices import resolve_devices
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
-DEFAULT_SCORE = 0.5
+
+
+def missing_score(modality, dataset):
+    """Score of a missing modality: the threshold of its unimodal classifier
+    (config threshold: calibrated, or the fixed one), i.e. its decision point."""
+    return method_threshold(modality, dataset)
 
 
 def run(cmd):
@@ -47,7 +54,6 @@ def fuse_scores(s_txt, s_img, mode, dataset):
             return None
         X = np.column_stack([s_txt, s_img]).astype(float)
         if head_input_space(dataset) == "logits":
-            # Missing modality = score 0.5 = logit 0.
             X = np.clip(X, 1e-7, 1 - 1e-7)
             X = np.log(X / (1 - X))
         return np.asarray(pytorch_head_score(mode, X, dataset)).reshape(-1)
@@ -87,8 +93,8 @@ def late_fusion_ablation(text_csv, image_csv, output_dir, dataset):
     rows = []
     for mode in LATE_FUSION_MODES:
         both = fuse_scores(s_txt, s_img, mode, dataset)
-        img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, mode, dataset)
-        txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), mode, dataset)
+        img_only = fuse_scores(np.full_like(s_txt, missing_score("text", dataset)), s_img, mode, dataset)
+        txt_only = fuse_scores(s_txt, np.full_like(s_img, missing_score("image", dataset)), mode, dataset)
 
         if both is None or img_only is None or txt_only is None:
             print(f"  [SKIP] {mode} — fitted head not found")

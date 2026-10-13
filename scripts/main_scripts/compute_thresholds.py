@@ -34,7 +34,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from configuration_files.configuration import (
-    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, RAND_SEED,
+    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, RAND_SEED, TRAIN_SEED,
     THRESHOLD_FPR, dataset_devices, image_weights_path, thresholds_path,
 )
 from configuration_files.paths import dataset_result_root
@@ -81,7 +81,7 @@ def main():
     p.add_argument("--devices", nargs="+", default=None)
     p.add_argument("--fpr", type=float, default=THRESHOLD_FPR)
     p.add_argument("--skip-eval", action="store_true", help="reuse existing validation scores")
-    p.add_argument("--seed", type=int, default=RAND_SEED)
+    p.add_argument("--seed", type=int, default=TRAIN_SEED)
     args = p.parse_args()
 
     devices = resolve_devices(args.devices or dataset_devices(args.dataset))

@@ -1,31 +1,32 @@
 """Clean, missing-modality ablation and adversarial metrics for one dataset,
-kept separate: each has its own CSV (all metrics), its own md/tex table
-(reported metrics) and its own paper table.
+kept separate. Writes only into the results folder of the run
+(results/<dataset>/<subset>/<seed>/): CSV files with every metric and
+Markdown tables with the reported ones. No LaTeX, nothing outside results/.
 
 Real (label 1) is the positive class; predictions use each method's own
 threshold (score > threshold). Metrics computed for every row: n, n_real,
 n_fake, AUC, accuracy, balanced_accuracy, TPR, FPR, TNR, FNR, precision, F1.
 
-* Clean (metrics_clean.csv): every method on the clean test set.
-  Reported: AUC, accuracy, TPR, FPR.
-* Ablation (metrics_ablation.csv): fusion methods with one modality missing.
-  Late fusion: the missing unimodal output is set to score 0.5 (logit 0 for
-  the heads on logits), at the method's threshold. Feature fusion: the joint
-  model with the missing modality's tokens dropped (drop variant of
-  scripts.utils.modality_ablation). Conditions: both, image only, text only;
-  deltas against both. Reported: AUC, accuracy, TPR, FPR per condition.
-* Adversarial (metrics_adv.csv): PGD, TREPAT, Sum, Union (perturbed/sum),
-  Joint (perturbed/interleaved). Sum is the additive baseline, not a run: a
-  sample counts as misclassified if PGD or TREPAT (each with its full budget)
-  misclassifies it. Also dTPR, dFPR (change from clean), n_clean_correct,
-  n_flipped, n_fixed and ASR = n_flipped / n_clean_correct.
-  Reported: TPR (dTPR), FPR (dFPR), ASR per attack. An attacked run whose
-  stored threshold differs from the clean one is stale and is skipped.
+* Clean (metrics_clean.csv, results_clean.md): AUC, accuracy, TPR, FPR.
+* Ablation (metrics_ablation.csv, results_ablation.md): fusion methods with
+  one modality missing. Late fusion: the missing unimodal output is set to its
+  classifier's threshold (its logit for the heads on logits). Feature fusion:
+  the available modality only (drop variant of scripts.utils.modality_ablation).
+  Reported: AUC and accuracy with their change from both modalities.
+* Adversarial (metrics_adv.csv, results_adv.md): PGD, TREPAT, Union
+  (perturbed/sum, half budget per modality) and Joint (perturbed/interleaved,
+  same budget). Also dTPR, dFPR (change from clean), n_clean_correct,
+  n_flipped, n_fixed, ASR = n_flipped / n_clean_correct. Reported: TPR (dTPR),
+  FPR (dFPR), ASR per attack. A run whose stored threshold differs from the
+  clean one is stale and is skipped.
+* Attack split (metrics_attack_split.csv, results_attack_split.md): ASR split by
+  the attacks that succeed (total, unimodal only, union or joint only, union
+  only, joint only).
+* Thresholds (results_thresholds.md): per-method threshold, its logit and
+  validation TPR/FPR.
 
 Usage:
     python3 scripts/results_table.py --dataset Fakeddit
-Writes <result root>/{metrics,results}_{clean,ablation,adv}.* and
-<paper-dir>/{clean,ablation,adv}_results_<DS>.tex and thresholds_<DS>.tex.
 """
 
 import argparse
@@ -39,10 +40,11 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from configuration_files.paths import dataset_result_root  # noqa: E402
+from configuration_files.configuration import RAND_SEED  # noqa: E402
 
 ATTACKS = [("PGD", "pgd"), ("TREPAT", "trepat"), ("Union", "sum"), ("Joint", "interleaved")]
-# Reporting order; Sum is derived from PGD and TREPAT (see docstring).
-SCENARIOS = ["PGD", "TREPAT", "Sum", "Union", "Joint"]
+# Reporting order. Union = the "sum" attack (perturbed/sum, half budget per modality).
+SCENARIOS = ["PGD", "TREPAT", "Union", "Joint"]
 METHODS = [("Text-only", "text"), ("Image-only", "image"), ("Feature fusion", "feature-fusion"),
            ("min", "min"), ("mean", "mean"), ("max", "max"), ("SVM-RBF", "svm-rbf"), ("linear", "linear")]
 CLEAN_COLS = [("AUC", "AUC"), ("Acc", "accuracy"), ("TPR", "TPR"), ("FPR", "FPR")]
@@ -99,7 +101,7 @@ def evaluate_clean(root, method):
 
 
 def evaluate_adv(root, method):
-    """One row per available attack (and Sum) for this method."""
+    """One row per available attack for this method."""
     loaded = load_clean(root, method)
     if loaded is None:
         return []
@@ -117,7 +119,6 @@ def evaluate_adv(root, method):
                     "ASR": (correct & wrong_adv).sum() / n_ok if n_ok else np.nan})
         return row
 
-    adv_preds = {}
     for name, attack in ATTACKS:
         run_dir = os.path.join(root, "perturbed", attack, method)
         pert_csv = os.path.join(run_dir, "perturbed_results.csv")
@@ -134,14 +135,7 @@ def evaluate_adv(root, method):
             print(f"WARNING: {attack}/{method} has {len(m)} of {len(c)} samples")
         rows.append(attacked_row(name, m["label"].values, m["score"].values,
                                  m["pred_clean"].values, m["pred_adv"].values, t_adv))
-        adv_preds[name] = m.set_index("index")[["label", "pred_clean", "pred_adv"]]
 
-    if "PGD" in adv_preds and "TREPAT" in adv_preds:
-        a, b = adv_preds["PGD"], adv_preds["TREPAT"].reindex(adv_preds["PGD"].index)
-        y = a["label"].values
-        either_wrong = (a["pred_adv"].values != y) | (b["pred_adv"].values != y)
-        rows.append(attacked_row("Sum", y, None, a["pred_clean"].values,
-                                 np.where(either_wrong, 1 - y, y), t_clean))
     order = {sc: k for k, sc in enumerate(SCENARIOS)}
     return sorted(rows, key=lambda r: order[r["scenario"]])
 
@@ -171,16 +165,22 @@ def evaluate_ablation(root, dataset, method):
         st, si = c["score_text"].values, c["score_image"].values
         lt, li = c["logit_text"].values, c["logit_image"].values
 
+        from scripts.main_scripts.run_ablation import missing_score
+        # A missing modality gets its unimodal classifier's threshold (score, or
+        # its logit for heads on logits): the classifier's decision point.
+        t_txt, t_img = missing_score("text", dataset), missing_score("image", dataset)
+
         def fuse(text_present, image_present):
             if method in ("min", "mean", "max"):
-                a_, b_ = (st if text_present else np.full_like(st, 0.5)), (si if image_present else np.full_like(si, 0.5))
+                a_ = st if text_present else np.full_like(st, t_txt)
+                b_ = si if image_present else np.full_like(si, t_img)
                 return {"min": np.minimum, "max": np.maximum,
                         "mean": lambda u, v: (u + v) / 2}[method](a_, b_)
             logits = head_input_space(dataset) == "logits"
-            missing = 0.0 if logits else 0.5
+            fill = (lambda t: np.log(t / (1 - t))) if logits else (lambda t: t)
             tx, im = (lt, li) if logits else (st, si)
-            X = np.column_stack([tx if text_present else np.full_like(tx, missing),
-                                 im if image_present else np.full_like(im, missing)])
+            X = np.column_stack([tx if text_present else np.full_like(tx, fill(t_txt)),
+                                 im if image_present else np.full_like(im, fill(t_img))])
             return np.asarray(pytorch_head_score(method, X, dataset)).reshape(-1)
 
         scores = {"both": fuse(True, True), "image_only": fuse(False, True), "text_only": fuse(True, False)}
@@ -201,190 +201,67 @@ def fmt(v):
     return "—" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.3f}"
 
 
-def with_delta(v, d, tex=False):
-    """'0.120 (+0.010)'; in LaTeX the minus sign is $-$."""
+def with_delta(v, d):
+    """'0.120 (+0.010)'."""
     if v is None or d is None:
         return "—"
-    sign = ("$-$" if tex else "−") if d < -5e-4 else "+"
+    sign = "−" if d < -5e-4 else "+"
     return f"{v:.3f} ({sign}{abs(d):.3f})"
 
 
 def write_table(path, title, header, body):
+    """Markdown table (path + '.md')."""
     md = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     md += ["| " + " | ".join(r) + " |" for r in body]
     with open(path + ".md", "w") as f:
         f.write(title + "\n\n" + "\n".join(md) + "\n")
-    tex = [r"\begin{tabular}{l" + "c" * (len(header) - 1) + "}", r"\hline",
-           " & ".join(rf"\textbf{{{h}}}" for h in header) + r" \\", r"\hline"]
-    tex += [" & ".join(r).replace("—", "---") + r" \\" for r in body]
-    tex += [r"\hline", r"\end{tabular}"]
-    with open(path + ".tex", "w") as f:
-        f.write("\n".join(tex) + "\n")
     print(title + "\n" + "\n".join(md) + "\n")
 
 
-PAPER_GROUPS = [("Unimodal", [("Text-only classifier", "text"), ("Image-only classifier", "image")]),
-                ("Late fusion", [("min", "min"), ("mean", "mean"), ("max", "max"),
-                                 ("linear", "linear"), ("SVM-RBF", "svm-rbf")]),
-                ("Feature fusion", [("Feature fusion", "feature-fusion")])]
+def attack_overlap_asr(root, method):
+    """ASR (%) over the clean-correct samples, split by which attacks succeed:
+    total (any of PGD, TREPAT, union, joint); unimodal only (PGD or TREPAT, but
+    neither union nor joint); union or joint only (but neither PGD nor TREPAT),
+    and within it union only and joint only."""
+    c = pd.read_csv(os.path.join(root, "clean", method, "results.csv")).set_index("index")
+    ok = (c["pred"] == c["label"]).values
+
+    def flipped(attack):
+        p = pd.read_csv(os.path.join(root, "perturbed", attack, method, "perturbed_results.csv"))
+        return ok & (p.set_index("index")["pred"].reindex(c.index).values != c["label"].values)
+
+    uni = flipped("pgd") | flipped("trepat")
+    u, j = flipped("sum"), flipped("interleaved")
+    multi = u | j
+    n = ok.sum()
+    pct = lambda mask: 100 * mask.sum() / n if n else np.nan
+    return {"method": method, "total": pct(uni | multi), "unimodal_only": pct(uni & ~multi),
+            "multimodal_only": pct(multi & ~uni), "union_only": pct(u & ~j & ~uni),
+            "joint_only": pct(j & ~u & ~uni)}
 
 
-def paper_clean_table(df, dataset, path):
-    """Clean table in the paper's layout; best value per column in bold
-    (highest AUC/Acc/TPR, lowest FPR)."""
-    cols = CLEAN_COLS
-    clean = df.set_index("method")
-    best = {k: (clean[k].min() if k == "FPR" else clean[k].max()) for _, k in cols}
-    n = len(cols) + 1
-    lines = [r"\begin{table}[t]", r"\centering",
-             rf"\caption{{Clean performance on the {dataset} test set. Real is the positive class; "
-             r"each method uses its own threshold, set to a $10\%$ false positive rate on the "
-             r"validation split. Best value per metric in bold.}",
-             r"\label{tab:clean-performance}", r"\begin{tabular}{l" + " c" * len(cols) + "}", r"\hline",
-             rf"\multicolumn{{{n}}}{{c}}{{\textbf{{{dataset}}}}} \\", r"\hline",
-             r"\textbf{Method} & " + " & ".join(rf"\textbf{{{h}}}" for h, _ in cols) + r" \\", r"\hline"]
-    for group, methods in PAPER_GROUPS:
-        lines.append(rf"\multicolumn{{{n}}}{{l}}{{\textit{{{group}}}}} \\")
-        for name, m in methods:
-            if m not in clean.index:
-                continue
-            cells = [(rf"\textbf{{{clean.at[m, k]:.3f}}}" if np.isclose(clean.at[m, k], best[k])
-                      else f"{clean.at[m, k]:.3f}") for _, k in cols]
-            lines.append(rf"\quad {name} & " + " & ".join(cells) + r" \\")
-    lines += [r"\hline", r"\end{tabular}", r"\end{table}"]
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {path}")
-
-
-def paper_adv_table(df, dataset, path):
-    """Adversarial table in the paper's layout: one row per method, one column
-    group (TPR, FPR, ASR) per attack; lowest ASR per attack in bold."""
-    adv = df
-    scen = [sc for sc in SCENARIOS if (adv.scenario == sc).any()]
-    best = {sc: adv.loc[adv.scenario == sc, "ASR"].min() for sc in scen}
-    ncol = 1 + 3 * len(scen)
-    lines = [r"\begin{table*}[t]", r"\centering",
-             rf"\caption{{Fusion methods under attack on the {dataset} test set. TPR and FPR are computed "
-             r"on all test samples, with the change from clean inputs in parentheses; ASR is the fraction "
-             r"of the samples classified correctly on clean input that are misclassified after the attack. "
-             r"Sum counts a sample as misclassified if PGD or TREPAT, each with its full budget, "
-             r"misclassifies it; the union and joint attacks use half of each budget. "
-             r"Lowest ASR per attack in bold.}",
-             r"\label{tab:adv-results}", r"\resizebox{\textwidth}{!}{%",
-             r"\begin{tabular}{l" + " ccc" * len(scen) + "}", r"\hline",
-             r"\textbf{Method} & " + " & ".join(rf"\multicolumn{{3}}{{c}}{{\textbf{{{sc}}}}}" for sc in scen)
-             + r" \\",
-             "".join(rf"\cmidrule(lr){{{2 + 3 * k}-{4 + 3 * k}}}" for k in range(len(scen))),
-             " & " + " & ".join(r"TPR ($\Delta$) & FPR ($\Delta$) & ASR" for _ in scen) + r" \\",
-             r"\hline"]
-    for group, methods in PAPER_GROUPS:
-        lines.append(rf"\multicolumn{{{ncol}}}{{l}}{{\textit{{{group}}}}} \\")
-        for name, m in methods:
-            cells = []
-            for sc in scen:
-                r = adv[(adv.method == m) & (adv.scenario == sc)]
-                if r.empty:
-                    cells += ["---"] * 3
-                    continue
-                r = r.iloc[0]
-                asr = f"{r['ASR']:.3f}"
-                if np.isclose(r["ASR"], best[sc]):
-                    asr = rf"\textbf{{{asr}}}"
-                cells += [with_delta(r["TPR"], r["dTPR"], tex=True),
-                          with_delta(r["FPR"], r["dFPR"], tex=True), asr]
-            lines.append(rf"\quad {name} & " + " & ".join(cells) + r" \\")
-    lines += [r"\hline", r"\end{tabular}}", r"\end{table*}"]
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {path}")
-
-
-def paper_ablation_table(df, dataset, path):
-    """Ablation table in the paper's layout: one row per fusion method, one
-    column group (AUC, Acc, TPR, FPR) per condition."""
-    conds = [(h, c) for h, c in ABLATION_CONDITIONS if (df.condition == c).any()]
-    cols = CLEAN_COLS
-    ncol = 1 + len(cols) * len(conds)
-    lines = [r"\begin{table*}[t]", r"\centering",
-             rf"\caption{{Missing-modality ablation on the {dataset} test set. For late fusion, the "
-             r"output of the missing uni-modal classifier is set to a score of $0.5$; feature fusion is "
-             r"fed the available modality only. Real is the positive class; each method keeps its "
-             r"threshold.}",
-             r"\label{tab:missing-modality-ablation}", r"\resizebox{\textwidth}{!}{%",
-             r"\begin{tabular}{l" + (" " + "c" * len(cols)) * len(conds) + "}", r"\hline",
-             r"\textbf{Method} & " + " & ".join(rf"\multicolumn{{{len(cols)}}}{{c}}{{\textbf{{{h}}}}}"
-                                                   for h, _ in conds) + r" \\",
-             "".join(rf"\cmidrule(lr){{{2 + len(cols) * k}-{1 + len(cols) * (k + 1)}}}"
-                     for k in range(len(conds))),
-             " & " + " & ".join(" & ".join(h for h, _ in cols) for _ in conds) + r" \\", r"\hline"]
-    for group, methods in PAPER_GROUPS:
-        present = [(n, m) for n, m in methods if (df.method == m).any()]
-        if not present:
-            continue
-        lines.append(rf"\multicolumn{{{ncol}}}{{l}}{{\textit{{{group}}}}} \\")
-        for name, m in present:
-            cells = []
-            for _, cond in conds:
-                r = df[(df.method == m) & (df.condition == cond)]
-                cells += ["---"] * len(cols) if r.empty else [f"{r.iloc[0][k]:.3f}" for _, k in cols]
-            lines.append(rf"\quad {name} & " + " & ".join(cells) + r" \\")
-    lines += [r"\hline", r"\end{tabular}}", r"\end{table*}"]
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {path}")
-
-
-def paper_thresholds_table(dataset, path):
-    """Calibrated per-method thresholds (checkpoints/<ds>/thresholds.json)."""
-    from configuration_files.configuration import thresholds_path
-    with open(thresholds_path(dataset)) as f:
-        info = json.load(f)
-    table = info["thresholds"]
-    lines = [r"\begin{table}[t]", r"\centering",
-             rf"\caption{{Decision thresholds on the score of the Real class, set per method on the "
-             rf"{dataset} validation split ($n={info['n_real'] + info['n_fake']}$) to a false positive "
-             rf"rate of ${100 * info['target_fpr']:g}\%$, with the resulting validation TPR and FPR. The "
-             r"thresholds of the trained rules are set on 5-fold cross-fitted validation scores. Each "
-             r"method uses its threshold in all experiments.}",
-             r"\label{tab:thresholds}", r"\begin{tabular}{l c c c c}", r"\hline",
-             r"\textbf{Method} & \textbf{Threshold} & \textbf{Logit} & \textbf{Val TPR} & "
-             r"\textbf{Val FPR} \\", r"\hline"]
-    for group, methods in PAPER_GROUPS:
-        present = [(n, m) for n, m in methods if m in table]
-        if not present:
-            continue
-        lines.append(rf"\multicolumn{{5}}{{l}}{{\textit{{{group}}}}} \\")
-        for name, m in present:
-            t = table[m]["threshold"]
-            lines.append(rf"\quad {name} & {t:.5f} & {np.log(t / (1 - t)):.2f} & "
-                         rf"{table[m]['val_tpr']:.3f} & {table[m]['val_fpr']:.3f} \\")
-    lines += [r"\hline", r"\end{tabular}", r"\end{table}"]
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"wrote {path}")
+SPLIT_COLS = [("Total", "total"), ("Unimodal only", "unimodal_only"),
+              ("Union or joint only", "multimodal_only"), ("Union only", "union_only"),
+              ("Joint only", "joint_only")]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dataset", required=True)
-    ap.add_argument("--paper-dir", default="paper/generated/tables")
     args = ap.parse_args()
     root = dataset_result_root(args.dataset)
 
-    os.makedirs(args.paper_dir, exist_ok=True)
     clean = pd.DataFrame([r for _, m in METHODS for r in evaluate_clean(root, m)])
     if clean.empty:
         sys.exit(f"no clean results under {root}")
     ablation = pd.DataFrame([r for _, m in ABLATION_METHODS for r in evaluate_ablation(root, args.dataset, m)])
     adv = pd.DataFrame([r for _, m in METHODS for r in evaluate_adv(root, m)])
+    # Every saved result names the dataset and test-subset seed it was computed on.
+    tag = f"{args.dataset} (seed {RAND_SEED})"
     for name, frame in (("clean", clean), ("ablation", ablation), ("adv", adv)):
+        frame.insert(0, "seed", RAND_SEED)
+        frame.insert(0, "dataset", args.dataset)
         frame.to_csv(os.path.join(root, f"metrics_{name}.csv"), index=False)
-    stale = os.path.join(root, "metrics_all.csv")
-    if os.path.isfile(stale):
-        os.remove(stale)
 
     def get(frame, m, k, **where):
         sel = frame["method"] == m if not frame.empty else None
@@ -392,39 +269,62 @@ def main():
             sel &= frame[col] == val
         return frame.loc[sel, k].iloc[0] if sel is not None and sel.any() and k in frame else None
 
-    # 0. calibrated thresholds
-    paper_thresholds_table(args.dataset, os.path.join(args.paper_dir, f"thresholds_{args.dataset}.tex"))
+    # Thresholds
+    from configuration_files.configuration import thresholds_path
+    with open(thresholds_path(args.dataset)) as f:
+        th = json.load(f)["thresholds"]
+    write_table(os.path.join(root, "results_thresholds"), f"{tag}, calibrated thresholds",
+                ["Method", "Threshold", "Logit", "Val TPR", "Val FPR"],
+                [[name, f"{th[m]['threshold']:.5f}",
+                  f"{np.log(th[m]['threshold'] / (1 - th[m]['threshold'])):.2f}",
+                  f"{th[m]['val_tpr']:.3f}", f"{th[m]['val_fpr']:.3f}"]
+                 for name, m in METHODS if m in th])
 
-    # 1. clean
+    # Clean
     write_table(os.path.join(root, "results_clean"),
-                f"{args.dataset}, clean test set (Real = positive, per-method threshold)",
+                f"{tag}, clean test set (Real = positive, per-method threshold)",
                 ["Method"] + [h for h, _ in CLEAN_COLS],
                 [[name] + [fmt(get(clean, m, k)) for _, k in CLEAN_COLS] for name, m in METHODS])
-    paper_clean_table(clean, args.dataset, os.path.join(args.paper_dir, f"clean_results_{args.dataset}.tex"))
 
-    # 2. missing-modality ablation
+    # Missing-modality ablation: AUC and accuracy, change from both modalities
     if not ablation.empty:
+        cols = [("AUC", "AUC"), ("Acc", "accuracy")]
+        conds = [c for c in ABLATION_CONDITIONS if c[1] != "both"]
         write_table(os.path.join(root, "results_ablation"),
-                    f"{args.dataset}, missing-modality ablation (Real = positive, per-method threshold)",
-                    ["Method"] + [f"{h} {c}" for h, _ in ABLATION_CONDITIONS for c, _ in CLEAN_COLS],
-                    [[name] + [fmt(get(ablation, m, k, condition=cond))
-                               for _, cond in ABLATION_CONDITIONS for _, k in CLEAN_COLS]
+                    f"{tag}, missing-modality ablation (change from both modalities in parentheses)",
+                    ["Method"] + [f"{h} {c}" for h, _ in conds for c, _ in cols],
+                    [[name] + [with_delta(get(ablation, m, k, condition=cond),
+                                          get(ablation, m, "d" + k, condition=cond))
+                               for _, cond in conds for _, k in cols]
                      for name, m in ABLATION_METHODS])
-        paper_ablation_table(ablation, args.dataset,
-                             os.path.join(args.paper_dir, f"ablation_results_{args.dataset}.tex"))
 
-    # 3. adversarial
+    # Adversarial
     if not adv.empty:
         write_table(os.path.join(root, "results_adv"),
-                    f"{args.dataset}, attacked test set (TPR/FPR on all samples, change from clean in "
-                    f"parentheses; ASR on clean-correct; Sum = flipped by PGD or TREPAT)",
+                    f"{tag}, attacked test set (TPR/FPR on all samples, change from clean in "
+                    f"parentheses; ASR on clean-correct; Union = sum attack, half budget each)",
                     ["Method"] + [f"{sc} {h}" for sc in SCENARIOS for h in ("TPR (Δ)", "FPR (Δ)", "ASR")],
                     [[name] + [c for sc in SCENARIOS for c in (
                         with_delta(get(adv, m, "TPR", scenario=sc), get(adv, m, "dTPR", scenario=sc)),
                         with_delta(get(adv, m, "FPR", scenario=sc), get(adv, m, "dFPR", scenario=sc)),
                         fmt(get(adv, m, "ASR", scenario=sc)))]
                      for name, m in METHODS])
-        paper_adv_table(adv, args.dataset, os.path.join(args.paper_dir, f"adv_results_{args.dataset}.tex"))
+
+        # ASR split by the attacks that succeed (fusion methods only)
+        try:
+            split = pd.DataFrame([attack_overlap_asr(root, m) for _, m in ABLATION_METHODS])
+        except FileNotFoundError as e:
+            print(f"attack split skipped: {e}")
+        else:
+            split.insert(0, "seed", RAND_SEED)
+            split.insert(0, "dataset", args.dataset)
+            split.to_csv(os.path.join(root, "metrics_attack_split.csv"), index=False)
+            write_table(os.path.join(root, "results_attack_split"),
+                        f"{tag}, ASR (%) split by the attacks that succeed",
+                        ["Method"] + [h for h, _ in SPLIT_COLS],
+                        [[name] + [f"{split.set_index('method').at[m, k]:.1f}" for _, k in SPLIT_COLS]
+                         for name, m in ABLATION_METHODS])
+    print(f"wrote metrics_*.csv and results_*.md in {root}")
 
 
 if __name__ == "__main__":

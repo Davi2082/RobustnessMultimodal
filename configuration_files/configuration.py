@@ -26,7 +26,33 @@ def _number(value):
     return value
 
 
-RAND_SEED = _CFG["rand_seed"]
+# rand_seed: one test-subset seed or a list of them (run_scripts.sh runs the
+# pipeline once per seed, exporting RM_RAND_SEED); it also names the results
+# folder. Without RM_RAND_SEED, the first seed is used.
+_SEEDS = _CFG["rand_seed"]
+RAND_SEEDS = [int(x) for x in (_SEEDS if isinstance(_SEEDS, list) else [_SEEDS])]
+RAND_SEED = int(os.environ.get("RM_RAND_SEED", RAND_SEEDS[0]))
+# Training seed (neural models, fusion heads, threshold folds): fixed, so every
+# test subset is evaluated with the same models and thresholds.
+TRAIN_SEED = int(_CFG.get("train_seed", RAND_SEED))
+# attack_seed: None = attacks unseeded; an integer s seeds random, numpy and
+# torch with s + sample index before each attacked sample (TREPAT's paraphrase
+# sampling and fragment choice), independently of sharding and sample order.
+ATTACK_SEED = _CFG.get("attack_seed")
+
+
+def seed_attack(index):
+    """Seed all RNGs for one attacked sample (no-op when attack_seed is null)."""
+    if ATTACK_SEED is None:
+        return
+    import random as _random
+    import numpy as _np
+    import torch as _torch
+    seed = int(ATTACK_SEED) + int(index)
+    _random.seed(seed)
+    _np.random.seed(seed % 2**32)
+    _torch.manual_seed(seed)
+    _torch.cuda.manual_seed_all(seed)
 OVERWRITE = bool(_CFG.get("overwrite", 0))
 
 # Pipeline stage toggles (0/1 in config.yaml)

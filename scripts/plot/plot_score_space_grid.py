@@ -33,7 +33,7 @@ import pandas as pd
 
 from matplotlib.collections import LineCollection
 
-from configuration_files.configuration import THRESHOLD, DATASET, method_threshold
+from configuration_files.configuration import THRESHOLD, DATASET, RAND_SEED, method_threshold
 from configuration_files.paths import dataset_result_root
 
 LATE_RULES = ("min", "mean", "max", "svm-rbf", "linear")
@@ -175,20 +175,20 @@ def get_axes(df, method, ff_ablation=None):
 def get_ablation_axes(df, method, ff_ablation=None, dataset=None):
     """(label, image-only value, text-only value) from missing-modality ablation.
 
-    Late fusion: the fused score with the absent modality's score set to
-    DEFAULT_SCORE, exactly as run_ablation.py computes it. Feature fusion: its
+    Late fusion: the fused score with the absent modality's score set to its
+    unimodal threshold, exactly as run_ablation.py computes it. Feature fusion: its
     own image-only / text-only outputs (same as get_axes).
     """
     if method == "feature-fusion":
         return get_axes(df, method, ff_ablation)
-    from scripts.main_scripts.run_ablation import DEFAULT_SCORE, fuse_scores
+    from scripts.main_scripts.run_ablation import fuse_scores, missing_score
 
     unimodal = get_axes(df, method)
     if unimodal is None:
         return None
     label, s_img, s_txt = unimodal
-    img_only = fuse_scores(np.full_like(s_txt, DEFAULT_SCORE), s_img, method, dataset)
-    txt_only = fuse_scores(s_txt, np.full_like(s_img, DEFAULT_SCORE), method, dataset)
+    img_only = fuse_scores(np.full_like(s_txt, missing_score("text", dataset)), s_img, method, dataset)
+    txt_only = fuse_scores(s_txt, np.full_like(s_img, missing_score("image", dataset)), method, dataset)
     if img_only is None or txt_only is None:
         return None
     return label, np.asarray(img_only).reshape(-1), np.asarray(txt_only).reshape(-1)
@@ -219,19 +219,19 @@ def spaced_logit_ticks(lim, min_frac=0.15):
 def ablation_bounds(method, dataset, pad=0.02):
     """Axis limits = the range each ablation score can take.
 
-    The image-only score is the rule applied to (DEFAULT_SCORE, s_img) for
-    s_img in [0, 1], the text-only score to (s_txt, DEFAULT_SCORE); e.g. min is
-    bounded to [0, 0.5], mean to [0.25, 0.75], max to [0.5, 1]. Learned heads
-    are swept numerically. Feature fusion is unbounded: [0, 1].
+    The image-only score is the rule applied to (t_text, s_img) for s_img in
+    [0, 1], the text-only score to (s_txt, t_image), with t the unimodal
+    thresholds (run_ablation.missing_score); swept numerically. Feature fusion is unbounded: [0, 1].
     """
     if method not in LATE_RULES:
         return (-pad, 1 + pad), (-pad, 1 + pad)
-    from scripts.main_scripts.run_ablation import DEFAULT_SCORE, fuse_scores
+    from scripts.main_scripts.run_ablation import fuse_scores, missing_score
 
     sweep = np.linspace(0, 1, 1001)
-    fixed = np.full_like(sweep, DEFAULT_SCORE)
+    no_text = np.full_like(sweep, missing_score("text", dataset))
+    no_image = np.full_like(sweep, missing_score("image", dataset))
     limits = []
-    for s_txt, s_img in ((fixed, sweep), (sweep, fixed)):  # image-only, text-only
+    for s_txt, s_img in ((no_text, sweep), (sweep, no_image)):  # image-only, text-only
         fused = fuse_scores(s_txt, s_img, method, dataset)
         if fused is None:
             limits.append((-pad, 1 + pad))
@@ -387,7 +387,6 @@ def main():
     parser.add_argument("--result-root", default=None,
                         help="Override result root (default: derived from config)")
     parser.add_argument("--out-dir", default=FIG_DIR)
-    parser.add_argument("--paper-dir", default=None)
     parser.add_argument("--axes", choices=("unimodal", "ablation"), default="unimodal",
                         help="unimodal: late fusion on its two unimodal scores (with "
                              "decision regions); ablation: every method on its "
@@ -571,8 +570,10 @@ def main():
         kind = f"Ablation {space}" if args.axes == "ablation" else space.capitalize()
         # Clean figure: no scenario suffix; attacked figures name the attack.
         suffix = "" if scenario == "clean" else f" -- {title}"
-        if not args.column:
-            fig.suptitle(f"{args.dataset}: {kind} by fusion method{suffix}", fontsize=15)
+        if args.column:
+            fig.suptitle(f"{args.dataset} (seed {RAND_SEED}){suffix}", fontsize=13, y=1.06)
+        else:
+            fig.suptitle(f"{args.dataset} (seed {RAND_SEED}): {kind} by fusion method{suffix}", fontsize=15)
         if args.column:
             # Axes only on the outer panels: no ticks between neighbouring panels.
             for ax in axes.ravel():
@@ -582,7 +583,7 @@ def main():
         if args.column:
             fig.subplots_adjust(wspace=0.05, hspace=0.05)
 
-        stem = f"{args.dataset}_score_space_{scenario.replace('+', '_').lower()}"
+        stem = f"{args.dataset}_seed{RAND_SEED}_score_space_{scenario.replace('+', '_').lower()}"
         if args.unique:
             stem += "_unique"
         if args.path and scenario != "clean":
@@ -594,10 +595,6 @@ def main():
         for ext in ("png", "pdf"):
             fig.savefig(os.path.join(out_dir, f"{stem}.{ext}"),
                         dpi=200, bbox_inches="tight")
-        if args.paper_dir:
-            os.makedirs(args.paper_dir, exist_ok=True)
-            fig.savefig(os.path.join(args.paper_dir, f"{stem}.pdf"),
-                        bbox_inches="tight")
         plt.close(fig)
         print(f"wrote {os.path.join(out_dir, stem)}.{{png,pdf}}")
 

@@ -64,10 +64,10 @@ class TargetedTrepatAttacker:
                 best_target_prob = target_prob
                 best_text = x_new
 
-            pred_new = victim.get_pred([x_new])[0]
-            if pred_new == self.target_label:
-                return x_new
-
+        # Maximum confidence: the whole query budget is spent and the variant
+        # with the highest target-class probability is returned, instead of
+        # stopping at the first variant that crosses the decision threshold
+        # (same as PGD, which always runs all its steps).
         return best_text
 
 

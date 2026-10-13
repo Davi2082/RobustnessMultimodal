@@ -22,6 +22,7 @@ RUN_ADVERSARIAL=$(python3 -c 'from configuration_files.configuration import ADVE
 OVERWRITE=$(python3 -c 'from configuration_files.configuration import OVERWRITE; print(int(OVERWRITE))')
 
 mapfile -t DATASETS < <(python3 -c 'from configuration_files.configuration import DATASETS; print("\n".join(DATASETS))')
+mapfile -t SEEDS < <(python3 -c 'from configuration_files.configuration import RAND_SEEDS; print("\n".join(map(str, RAND_SEEDS)))')
 mapfile -t TRAIN_MODELS < <(python3 -c 'from configuration_files.configuration import PIPELINE_TRAIN; print("\n".join(PIPELINE_TRAIN))')
 mapfile -t LATE_FUSIONS < <(python3 -c 'from configuration_files.configuration import PIPELINE_LATE_FUSION_MODES; print("\n".join(PIPELINE_LATE_FUSION_MODES))')
 mapfile -t FUSIONS < <(python3 -c 'from configuration_files.configuration import PIPELINE_FUSIONS; print("\n".join(PIPELINE_FUSIONS))')
@@ -31,18 +32,33 @@ M="python3 -m scripts.utils.metrics"
 FORCE_FLAG=""
 if [ "$OVERWRITE" -eq 1 ]; then FORCE_FLAG="--force"; fi
 
-for DATASET in "${DATASETS[@]}"; do
+# One background job per dataset, each on the GPUs in its dataset_configs
+# entry; output goes to logs/pipeline_<dataset>.log.
+run_dataset() {
+    local DATASET="$1"
+    FAILURES=()
+    SECONDS=0
     echo ""
     echo "====== PIPELINE: $DATASET ======"
 
-    # 0. Training (models from pipeline_train in config.yaml)
+    # 0. Training of the neural models in pipeline_train (config.yaml). The
+    #    learned fusion heads (svm-rbf, linear) are fitted in step 1, on the
+    #    validation outputs of the unimodal models.
     if [ "$RUN_TRAIN" -eq 1 ]; then
         for model in "${TRAIN_MODELS[@]}"; do
-            run_step "train $model ($DATASET)" python3 -m scripts.train_scripts.train --model "$model" --dataset "$DATASET"
+            case "$model" in svm-rbf|linear) continue ;; esac
+            run_step "train $model ($DATASET)" python3 -m scripts.train_scripts.train --model "$model" --dataset "$DATASET" $FORCE_FLAG
         done
     fi
 
-    # 1. Clean eval
+    # 1. Validation scores, learned heads on validation logits, calibrated
+    #    per-method thresholds (checkpoints/<ds>/thresholds.json). Needed
+    #    before any evaluation when config threshold is "calibrated".
+    if [ "$RUN_TRAIN" -eq 1 ] || [ "$RUN_CLEAN" -eq 1 ]; then
+        run_step "heads + thresholds ($DATASET)" python3 -m scripts.main_scripts.compute_thresholds --dataset "$DATASET"
+    fi
+
+    # 2. Clean eval
     if [ "$RUN_CLEAN" -eq 1 ]; then
         run_step "clean ($DATASET)" python3 -m scripts.main_scripts.run_clean --dataset "$DATASET" $FORCE_FLAG
 
@@ -54,12 +70,12 @@ for DATASET in "${DATASETS[@]}"; do
         done
     fi
 
-    # 2. Ablation
+    # 3. Ablation
     if [ "$RUN_ABLATION" -eq 1 ]; then
         run_step "ablation ($DATASET)" python3 -m scripts.main_scripts.run_ablation --dataset "$DATASET" $FORCE_FLAG
     fi
 
-    # 3. Adversarial attacks + metrics
+    # 4. Adversarial attacks + metrics
     if [ "$RUN_ADVERSARIAL" -eq 1 ]; then
         # Unimodal attacks
         run_step "image attack ($DATASET)" python3 -m attacks.unimodal.image.attack --dataset "$DATASET"
@@ -81,9 +97,38 @@ for DATASET in "${DATASETS[@]}"; do
             done
         done
     fi
+
+    echo ""
+    echo "====== DONE $DATASET — $((SECONDS / 60))m $((SECONDS % 60))s | ${#FAILURES[@]} failure(s) ======"
+    for f in "${FAILURES[@]}"; do echo "  - $f"; done
+    [ "${#FAILURES[@]}" -eq 0 ]
+}
+
+mkdir -p logs
+FAILED=()
+# One pipeline per test-subset seed (rand_seed in config.yaml, one value or a
+# list), run one after the other; every step sees the seed via RM_RAND_SEED
+# and writes to results/<dataset>/<subset>/<seed>/.
+for SEED in "${SEEDS[@]}"; do
+    export RM_RAND_SEED="$SEED"
+    echo "====== SEED $SEED ======"
+    declare -A PIDS=()
+    for DATASET in "${DATASETS[@]}"; do
+        LOG="logs/pipeline_${DATASET}_seed${SEED}.log"
+        run_dataset "$DATASET" > "$LOG" 2>&1 &
+        PIDS[$DATASET]=$!
+        echo "started $DATASET seed $SEED (pid ${PIDS[$DATASET]}) -> $LOG"
+    done
+    for DATASET in "${!PIDS[@]}"; do
+        wait "${PIDS[$DATASET]}" || FAILED+=("$DATASET seed $SEED")
+        # Clean / ablation / adversarial tables for this seed (CSV + Markdown in its results folder).
+        python3 scripts/results_table.py --dataset "$DATASET" >> "logs/pipeline_${DATASET}_seed${SEED}.log" 2>&1 \
+            || FAILED+=("$DATASET seed $SEED tables")
+    done
+    unset PIDS
 done
 
 echo ""
-echo "====== DONE — $((SECONDS / 60))m $((SECONDS % 60))s | ${#FAILURES[@]} failure(s) ======"
-for f in "${FAILURES[@]}"; do echo "  - $f"; done
-[ "${#FAILURES[@]}" -eq 0 ]
+echo "====== ALL DONE — $((SECONDS / 60))m $((SECONDS % 60))s | failed datasets: ${#FAILED[@]} ======"
+for d in "${FAILED[@]}"; do echo "  - $d (see logs/pipeline_<dataset>_seed<seed>.log)"; done
+[ "${#FAILED[@]}" -eq 0 ]

@@ -99,7 +99,7 @@ def ff_logits(model, images, texts, ablate=None, mode="blank"):
 def metrics(y, score, thr):
     """Fake (label 0) is the positive class, matching the rest of the pipeline.
 
-    TPR/TNR follow make_tables.py: TPR = accuracy on Real (label 1),
+    TPR = accuracy on Real (label 1),
     TNR = accuracy on Fake (label 0).
     """
     y_true = 1 - y

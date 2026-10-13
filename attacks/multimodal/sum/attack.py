@@ -82,6 +82,7 @@ from configuration_files.configuration import (
     MAX_VARIANTS,
     PGD_ITERS,
     RAND_SEED,
+    seed_attack,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -495,14 +496,14 @@ def validate_args(
         raise FileNotFoundError(f"Image-model weights do not exist: " f"{args.image_model_path}")
 
     # Learned rules are attacked through the head persisted by
-    # scripts/fit_fusion_heads.py, so clean and adversarial rows describe the
+    # scripts/main_scripts/compute_thresholds.py, so clean and adversarial rows describe the
     # same classifier.
     if args.fusion in LEARNED_RULES:
         head = fusion_head_path(args.fusion, args.dataset)
         if not os.path.exists(head):
             raise FileNotFoundError(
                 f"No fitted {args.fusion} head at {head}. "
-                "Run: python3 -m scripts.fit_fusion_heads"
+                "Run: python3 -m scripts.main_scripts.compute_thresholds (fits the heads)"
             )
 
     text_dataset = text_parameters["Dataset"]
@@ -743,12 +744,10 @@ class TrepatStepState:
         gain = target_prob - self.best_target_prob
         self.modifier.get_feedback(gain)
 
+        # Maximum confidence: keep the variant with the highest target-class
+        # probability, also after the decision has crossed the threshold.
         if target_prob > self.best_target_prob:
             self.best_target_prob = target_prob
-            self.best_text = x_new + self.hidden_text
-
-        pred_new = self.victim.get_pred([x_new])[0]
-        if pred_new == self.target_label:
             self.best_text = x_new + self.hidden_text
 
         return self._finalize(image)
@@ -1089,6 +1088,7 @@ def main() -> None:
 
             if should_attack:
                 attacked_samples += 1
+                seed_attack(index)
                 # One round reproduces the disjoint attack, where each
                 # modality is optimised against a clean partner. With more
                 # rounds each channel sees the other's current perturbation,
@@ -1197,13 +1197,8 @@ def main() -> None:
 
                         current_news = {"txt": current_news["txt"], "img": perturbed_image}
 
-                    if args.optimization != "sum":
-                        with torch.inference_mode():
-                            es_text = encode_text_batch(tokenizer, [current_news["txt"]], args.n_tokens, device)
-                            es_img = encode_image_batch(processor, [current_news["img"]], device)
-                            es_score, _ = model(es_img, es_text)
-                            if int(es_score.item() > args.threshold) == target_label:
-                                break
+                    # No early stop: like PGD and TREPAT, the joint attack spends its
+                    # whole budget (maximum confidence) once the decision has flipped.
 
                 for channel, hist in (("pgd", pgd_history), ("trepat", trepat_history)):
                     for it, rec in enumerate(hist):

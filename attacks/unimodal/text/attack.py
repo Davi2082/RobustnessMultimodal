@@ -40,6 +40,7 @@ from configuration_files.configuration import (
     MAX_WORDS_FOR_IMPORTANCE,
     MIN_TXT_SIMILARITY,
     RAND_SEED,
+    seed_attack,
     build_subset_sampler,
     dataset_balanced_subset,
     dataset_subset_size,
@@ -193,6 +194,7 @@ def main():
                 # Text perturbation
                 with torch.no_grad():
                     if args.attack_method == "trepat":
+                        seed_attack(indices[i].item())
                         trepat_history = []
                         news_txt_per, txt_similarity = trepat_attack(
                             model, tokenizer, processor, args, news, label, device,

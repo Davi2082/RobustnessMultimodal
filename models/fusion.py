@@ -345,7 +345,7 @@ def build_classifier(args, device):
         if not os.path.exists(head_path):
             raise FileNotFoundError(
                 f"No fitted {args.fusion} head at {head_path}. "
-                "Run scripts/fit_fusion_heads.py first."
+                "Run: python3 -m scripts.main_scripts.compute_thresholds (fits the heads)."
             )
         fusion_head = (
             DifferentiableRBFSVMFusion(joblib.load(head_path)) if args.fusion == "svm-rbf"

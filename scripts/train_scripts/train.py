@@ -29,7 +29,7 @@ from tqdm import tqdm
 from configuration_files.configuration import (
     BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE,
     LORA_ALPHA, LORA_DROPOUT, LORA_R, MERGE_TOKENS,
-    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED, USE_LORA,
+    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED, TRAIN_SEED, USE_LORA,
     dataset_devices, ff_weights_path, image_weights_path, text_weights_path,
 )
 from configuration_files.paths import dataset_weights_dir
@@ -272,7 +272,7 @@ def parse_args():
     parser.add_argument("--lora-dropout", type=float, default=LORA_DROPOUT)
     parser.add_argument("--use-lora", action=argparse.BooleanOptionalAction, default=USE_LORA)
     parser.add_argument("--num-workers", type=int, default=NUM_WORKERS)
-    parser.add_argument("--seed", type=int, default=RAND_SEED)
+    parser.add_argument("--seed", type=int, default=TRAIN_SEED)
     args = parser.parse_args()
     if args.devices is None:
         args.devices = dataset_devices(args.dataset)
