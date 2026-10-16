@@ -34,7 +34,7 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from configuration_files.configuration import (
-    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, PIPELINE_LATE_FUSION_MODES, RAND_SEED, TRAIN_SEED,
+    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, OVERWRITE, PIPELINE_LATE_FUSION_MODES, RAND_SEED, TRAIN_SEED,
     THRESHOLD_FPR, dataset_devices, image_weights_path, thresholds_path,
 )
 from configuration_files.paths import dataset_result_root
@@ -82,7 +82,14 @@ def main():
     p.add_argument("--fpr", type=float, default=THRESHOLD_FPR)
     p.add_argument("--skip-eval", action="store_true", help="reuse existing validation scores")
     p.add_argument("--seed", type=int, default=TRAIN_SEED)
+    p.add_argument("--force", action="store_true", help="refit even if heads and thresholds exist")
     args = p.parse_args()
+
+    from models.fusion import fusion_head_path
+    outputs = [thresholds_path(args.dataset)] + [fusion_head_path(r, args.dataset) for r in ("svm-rbf", "linear")]
+    if not (args.force or OVERWRITE) and all(os.path.isfile(f) for f in outputs):
+        print(f"SKIP: heads and thresholds exist ({thresholds_path(args.dataset)}); overwrite: 1 or --force to refit")
+        return
 
     devices = resolve_devices(args.devices or dataset_devices(args.dataset))
     if not args.skip_eval:
