@@ -104,9 +104,17 @@ def main():
     parser.add_argument("--device-mlm", type=str, default=None,
                         help="TREPAT rewriter / BERT MLM device. Defaults to the dataset's configured MLM device.")
     parser.add_argument("--output-dir", dest="output_dir", type=str, default=None)
+    parser.add_argument("--force", action="store_true", help="re-run even if results exist")
     parser.add_argument("--shard-id", dest="shard_id", type=int, default=0)
     parser.add_argument("--num-shards", dest="num_shards", type=int, default=1)
     args = parser.parse_args()
+
+    # Results dir setup — results/<dataset>/<subset>/<seed>/perturbed/<attack>/text/
+    attack_name = args.experiment_name or args.attack_method
+    output_dir = args.output_dir or model_perturbed_dir("text", attack_name, args.dataset)
+    if not args.force and os.path.isfile(os.path.join(output_dir, "perturbed_results.csv")):
+        print(f"SKIP: {output_dir}/perturbed_results.csv exists (use --force to re-run)")
+        return
 
     # Device setting
     device = torch.device(args.device or dataset_devices(args.dataset)[0])
@@ -133,9 +141,6 @@ def main():
     dataset_class = dataset_classes[args.dataset]
     load_func = load_functions[args.dataset]
 
-    # Results dir setup — results/<dataset>/text/perturbed/<attack>/
-    attack_name = args.experiment_name or args.attack_method
-    output_dir = args.output_dir or model_perturbed_dir("text", attack_name, args.dataset)
     os.makedirs(output_dir, exist_ok=True)
     loss_rows = []
 

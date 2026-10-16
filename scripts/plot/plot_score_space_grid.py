@@ -1,22 +1,10 @@
-"""Score-space scatters: one figure per scenario, one panel per fusion method.
+"""Score-space scatters in logit space: one figure per scenario, one panel per method.
 
-Each panel places every test sample in the plane spanned by the two uni-modal
-outputs (logit-scaled axes, labelled in logits) and shades the region the fusion rule accepts, so the
-effect of an attack is visible as movement relative to a fixed boundary.
-Feature fusion has no such plane -- its decision is not a function of the two
-uni-modal scores -- so its panel plots the joint model's own scores when fed
-the image only and the text only (drop ablation), with no decision region.
+Late-fusion panels show the rule's decision region; feature fusion uses its own
+image-only / text-only outputs. ``--axes ablation`` places every method by its
+missing-modality ablation.
 
-With ``--axes ablation`` every method is placed the same way, by its own
-missing-modality ablation: x = fused score with the text score set to 0.5
-(image only), y = fused score with the image score set to 0.5 (text only) --
-the rule used by run_ablation.py. The background/boundary is the same rule
-drawn as in the unimodal view.
-
-Figures go to <out-dir>/{unimodal,ablation}_scores/<dataset>/.
-
-Usage:
-    python3 scripts/plot/plot_score_space_grid.py [--dataset Recovery] [--axes ablation]
+    python3 scripts/plot/plot_score_space_grid.py --dataset Fakeddit [--column]
 """
 
 import argparse
@@ -57,15 +45,12 @@ TITLES = {
 LABELS = {"svm-rbf": "SVM-RBF", "feature-fusion": "feature fusion"}
 FIG_DIR = "figures/classification_results/scatter"
 GRID = 300
-# Scores saturate near 0 and 1, so axes use a logit scale (ticks stay in score
-# units). EPS clips exact 0/1 so every point lands on the axes.
-EPS = 1e-6
+EPS = 1e-6  # clips exact 0/1 on the logit axes
 LIMITS = (EPS / 2, 1 - EPS / 2)
 TICKS = [1e-4, 1e-2, 0.5, 1 - 1e-2, 1 - 1e-4]
 TICK_LABELS = ["1e-4", "0.01", "0.5", "0.99", "0.9999"]
-MARKER_SCALE = 1.0  # --column draws smaller markers
-LOGIT_TICKS = [-10, -5, 0, 5, 10]  # default tick labels (logit units); --score-ticks uses the above
-# Candidate ticks for the ablation view; each panel keeps those in its range.
+MARKER_SCALE = 1.0
+LOGIT_TICKS = [-10, -5, 0, 5, 10]
 ABLATION_TICKS = [1e-4, 1e-3, 1e-2, 0.05, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 0.95,
                   0.99, 0.999, 0.9999]
 
@@ -117,7 +102,6 @@ def rule_scores(name, pi, pt, heads=None, input_space="scores"):
         if heads is None or name not in heads:
             return None
         head = getattr(heads[name], "best_estimator_", heads[name])
-        # Heads are fitted on (text, image) columns -- see run_clean.py.
         feats = np.column_stack([pt, pi])
         if input_space == "logits":
             feats = np.clip(feats, 1e-7, 1 - 1e-7)
@@ -148,19 +132,12 @@ def load_ff_ablation(result_root):
 
 
 def get_axes(df, method, ff_ablation=None):
-    """Extract (label, image score, text score) arrays.
-
-    Clean CSVs name the columns score_image/score_text, perturbed CSVs
-    image_score/text_score. Feature fusion uses the clean modality ablation
-    when given, otherwise the per-modality components of an attacked run.
-    """
+    """(label, image score, text score); feature fusion uses its ablation outputs."""
     cols = COLUMNS
     if method == "feature-fusion":
         if ff_ablation is not None:
             img_col, txt_col = cols["ablation"]
             return ff_ablation["label"].values, ff_ablation[img_col].values, ff_ablation[txt_col].values
-        # Runs before the FeatureFusionClassifier fix copied the joint score
-        # into the component columns; treat those as missing.
         if df is None or "image_score" not in df.columns or (
             np.allclose(df["image_score"], df["score"])
             and np.allclose(df["text_score"], df["score"])
@@ -173,12 +150,7 @@ def get_axes(df, method, ff_ablation=None):
 
 
 def get_ablation_axes(df, method, ff_ablation=None, dataset=None):
-    """(label, image-only value, text-only value) from missing-modality ablation.
-
-    Late fusion: the fused score with the absent modality's score set to its
-    unimodal threshold, exactly as run_ablation.py computes it. Feature fusion: its
-    own image-only / text-only outputs (same as get_axes).
-    """
+    """(label, image-only, text-only) fused scores, missing input = its unimodal threshold."""
     if method == "feature-fusion":
         return get_axes(df, method, ff_ablation)
     from scripts.main_scripts.run_ablation import fuse_scores, missing_score
@@ -217,12 +189,7 @@ def spaced_logit_ticks(lim, min_frac=0.15):
 
 
 def ablation_bounds(method, dataset, pad=0.02):
-    """Axis limits = the range each ablation score can take.
-
-    The image-only score is the rule applied to (t_text, s_img) for s_img in
-    [0, 1], the text-only score to (s_txt, t_image), with t the unimodal
-    thresholds (run_ablation.missing_score); swept numerically. Feature fusion is unbounded: [0, 1].
-    """
+    """Range each ablation score can take (swept numerically)."""
     if method not in LATE_RULES:
         return (-pad, 1 + pad), (-pad, 1 + pad)
     from scripts.main_scripts.run_ablation import fuse_scores, missing_score
@@ -244,7 +211,7 @@ def ablation_bounds(method, dataset, pad=0.02):
 
 
 def sample_index(df, method, ff_ablation=None):
-    """Sample ids in the same order as get_axes / get_ablation_axes return them."""
+    """Sample ids in get_axes order."""
     source = ff_ablation if method == "feature-fusion" and ff_ablation is not None else df
     return source["index"].values
 
@@ -259,7 +226,7 @@ def _clean_vs_attacked(result_root, method, attack_dir):
 
 
 def flipped_ids(result_root, method, attack_dir):
-    """Ids the attack flipped: correct on clean inputs, wrong after the attack."""
+    """Ids correct on clean input and wrong after the attack."""
     merged = _clean_vs_attacked(result_root, method, attack_dir)
     if merged is None:
         return None
@@ -268,7 +235,7 @@ def flipped_ids(result_root, method, attack_dir):
 
 
 def attack_asr(result_root, method, attack_dir):
-    """(flipped, clean-correct): ASR over every clean-correct sample (untargeted)."""
+    """(flipped, clean-correct)."""
     merged = _clean_vs_attacked(result_root, method, attack_dir)
     if merged is None:
         return None
@@ -278,7 +245,7 @@ def attack_asr(result_root, method, attack_dir):
 
 
 def attacked_title(name, asr, n_unique=None):
-    """Panel title for an attacked scenario: ASR instead of a raw error count."""
+    """Attacked-panel title with ASR."""
     if asr is None:
         return name
     flipped, correct = asr
@@ -290,7 +257,7 @@ def attacked_title(name, asr, n_unique=None):
 
 
 def unique_flips(result_root, method, scenarios):
-    """Per scenario: ids flipped by that attack and by none of the others."""
+    """Per scenario: ids flipped only by that attack."""
     flips = {sc: flipped_ids(result_root, method, ATTACK_DIRS[sc]) for sc in scenarios}
     flips = {sc: ids for sc, ids in flips.items() if ids is not None}
     return {sc: ids - set().union(*(o for other, o in flips.items() if other != sc))
@@ -298,8 +265,7 @@ def unique_flips(result_root, method, scenarios):
 
 
 def decision_region(ax, rule, heads, xlim, ylim, input_space, threshold=THRESHOLD):
-    """Shade where the rule predicts Real (score > threshold) and draw the boundary
-    at the method's own decision threshold."""
+    """Shade where the rule predicts Real (score > threshold); draw the boundary."""
     gx, gy = np.meshgrid(score_grid(xlim), score_grid(ylim))
     grid = rule_scores(rule, gx.ravel(), gy.ravel(), heads, input_space)
     if grid is None:
@@ -313,15 +279,12 @@ def decision_region(ax, rule, heads, xlim, ylim, input_space, threshold=THRESHOL
 def panel(ax, label, img_val, txt_val, method, heads, pred, input_space,
           ff_linear=False, show_region=True, ablation=False, bounds=None, dataset=None,
           path_from=None):
-    """``path_from``: (clean image, clean text) aligned with img_val/txt_val; a
-    dashed segment is drawn from each clean position to the attacked one."""
+    """``path_from``: clean positions; draws a dashed segment to the attacked ones."""
     name = LABELS.get(method, method)
     if path_from is not None and not (ff_linear and method == "feature-fusion"):
         path_from = tuple(np.clip(v, EPS, 1 - EPS) for v in path_from)
 
     if ff_linear and method == "feature-fusion":
-        # Linear axes zoomed to the data: the text-only scores sit in a narrow
-        # band that 0-1 axes flatten into a line.
         def zoom(values, margin=0.05):
             lo, hi = float(np.min(values)), float(np.max(values))
             pad = margin * max(hi - lo, 1e-3)
@@ -330,14 +293,12 @@ def panel(ax, label, img_val, txt_val, method, heads, pred, input_space,
         ys = txt_val if path_from is None else np.concatenate([txt_val, path_from[1]])
         xlim, ylim = zoom(xs), zoom(ys)
     elif ablation:
-        # Ablation view: logit scale, zoomed to the range the rule can reach.
         img_val = np.clip(img_val, EPS, 1 - EPS)
         txt_val = np.clip(txt_val, EPS, 1 - EPS)
         ax.set_xscale("logit")
         ax.set_yscale("logit")
         ax.minorticks_off()
         bounds = bounds if bounds is not None else (LIMITS, LIMITS)
-        # Include the clean end of each path so no segment is cut off.
         x_all = img_val if path_from is None else np.concatenate([img_val, path_from[0]])
         y_all = txt_val if path_from is None else np.concatenate([txt_val, path_from[1]])
         xlim, ylim = (fit_logit_limits(v, b) for v, b in ((x_all, bounds[0]), (y_all, bounds[1])))
@@ -355,8 +316,6 @@ def panel(ax, label, img_val, txt_val, method, heads, pred, input_space,
         ax.set_yticks(TICKS, TICK_LABELS)
 
     if method in LATE_RULES and show_region:
-        # Same background/boundary as the unimodal view: the rule applied to
-        # the two axis values as (image score, text score).
         decision_region(ax, method, heads, xlim, ylim, input_space,
                         threshold=method_threshold(method, dataset) if dataset else THRESHOLD)
     ax.set_xlim(*xlim)
@@ -376,7 +335,6 @@ def panel(ax, label, img_val, txt_val, method, heads, pred, input_space,
     ax.scatter(img_val[fake], txt_val[fake], s=20 * MARKER_SCALE, c="#d62728",
                label="Fake", alpha=0.9, marker="^", edgecolors="none")
 
-    # Count errors from the pipeline's own predictions, not a re-derivation.
     wrong = int((pred != label).sum())
     ax.set_title(f"{name}\n{wrong} of {len(label)} misclassified", fontsize=11)
 
@@ -384,28 +342,14 @@ def panel(ax, label, img_val, txt_val, method, heads, pred, input_space,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default=DATASET)
-    parser.add_argument("--result-root", default=None,
-                        help="Override result root (default: derived from config)")
+    parser.add_argument("--result-root", default=None)
     parser.add_argument("--out-dir", default=FIG_DIR)
-    parser.add_argument("--axes", choices=("unimodal", "ablation"), default="unimodal",
-                        help="unimodal: late fusion on its two unimodal scores (with "
-                             "decision regions); ablation: every method on its "
-                             "image-only / text-only ablation scores")
-    parser.add_argument("--path", action="store_true",
-                        help="In attacked figures, draw a dashed line from each "
-                             "sample's clean position to its attacked position")
-    parser.add_argument("--unique", action="store_true",
-                        help="In attacked figures, keep only samples flipped by that "
-                             "attack and by none of the other attacks")
-    parser.add_argument("--column", action="store_true",
-                        help="Single-column paper layout: smaller canvas, larger fonts, "
-                             "fewer ticks, no figure title (the caption names it)")
-    parser.add_argument("--score-ticks", action="store_true",
-                        help="Label the logit-scaled axes in score units instead of "
-                             "logit units log(p/(1-p))")
-    parser.add_argument("--ff-linear", action="store_true",
-                        help="Draw the feature-fusion panel on "
-                             "linear 0-1 axes instead of the logit scale")
+    parser.add_argument("--axes", choices=("unimodal", "ablation"), default="unimodal")
+    parser.add_argument("--path", action="store_true", help="clean-to-attacked segments")
+    parser.add_argument("--unique", action="store_true", help="only samples flipped by that attack alone")
+    parser.add_argument("--column", action="store_true", help="single-column paper layout, no title")
+    parser.add_argument("--score-ticks", action="store_true", help="tick labels in scores, not logits")
+    parser.add_argument("--ff-linear", action="store_true", help="feature-fusion panel on linear axes")
     args = parser.parse_args()
     if not args.score_ticks:
         global TICKS, TICK_LABELS
@@ -428,15 +372,13 @@ def main():
         print(f"No results at {result_root}")
         return
 
-    # Learned heads are shaded with the same differentiable modules the
-    # pipeline scores with (SVC.predict_proba deviates by up to ~0.005).
+    # Same torch heads as the pipeline.
     from models.fusion import fusion_head_path
     heads = {rule: TorchHead(rule, args.dataset) for rule in ("svm-rbf", "linear")
              if os.path.isfile(fusion_head_path(rule, args.dataset))}
     input_space = head_input_space(args.dataset)
     ff_ablation = load_ff_ablation(result_root)
 
-    # Discover which scenarios have results
     scenarios = ["clean"]
     perturbed_root = os.path.join(result_root, "perturbed")
     for scenario_name, attack_dir in ATTACK_DIRS.items():
@@ -448,8 +390,7 @@ def main():
         print("No scenarios found")
         return
 
-    # Fonts in points at the saved size; --column is drawn at about twice the
-    # printed column width, so 13 pt prints at about 7 pt.
+    # --column is drawn at ~2x column width: 13 pt prints at ~7 pt.
     fs = ({"tick": 13, "title": 13, "label": 15, "legend": 12} if args.column
           else {"tick": 12, "title": 11, "label": 12, "legend": 10})
     plt.rcParams.update({"font.size": fs["tick"], "axes.titlesize": fs["title"]})
@@ -462,8 +403,6 @@ def main():
     for scenario in scenarios:
         if args.unique and scenario == "clean":
             continue
-        # --column: shared axes, panels labelled (a)-(f); methods and thresholds
-        # go in the caption, so the panels can sit next to each other.
         fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.9) if args.column else (13.5, 8.6),
                                  sharex=args.column, sharey=args.column)
 
@@ -473,7 +412,6 @@ def main():
             else:
                 df = load_perturbed(result_root, ATTACK_DIRS[scenario], method)
 
-            # The modality ablation was run on clean inputs only.
             ablation = ff_ablation if scenario == "clean" else None
             data = axes_for(df, method, ablation) if df is not None else None
 
@@ -498,7 +436,6 @@ def main():
                 clean_df = load_clean(result_root, method)
                 clean = axes_for(clean_df, method, ff_ablation) if clean_df is not None else None
                 if clean is not None:
-                    # Align clean positions to the attacked samples by sample id.
                     pos = pd.Series(np.arange(len(clean[0])),
                                     index=sample_index(clean_df, method, ff_ablation))
                     rows = pos.reindex(sample_index(df, method)).values
@@ -531,7 +468,6 @@ def main():
                           if args.axes == "ablation" else None),
                   dataset=args.dataset, path_from=path_from)
             if scenario == "clean":
-                # Clean panels: method and its decision threshold, no metrics.
                 t = method_threshold(method, args.dataset)
                 if args.column:
                     ax.set_title("")
@@ -550,7 +486,6 @@ def main():
         for ax in axes.ravel():
             if ax.get_legend_handles_labels()[0]:
                 if args.column:
-                    # Above the panels, so it hides no sample.
                     fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=2,
                                bbox_to_anchor=(0.5, 0.97), frameon=False, fontsize=fs["legend"],
                                markerscale=2.0)
@@ -568,14 +503,10 @@ def main():
         title = TITLES.get(scenario, scenario)
         space = "score space" if args.score_ticks else "logit space"
         kind = f"Ablation {space}" if args.axes == "ablation" else space.capitalize()
-        # Clean figure: no scenario suffix; attacked figures name the attack.
         suffix = "" if scenario == "clean" else f" -- {title}"
-        if args.column:
-            fig.suptitle(f"{args.dataset} (seed {RAND_SEED}){suffix}", fontsize=13, y=1.06)
-        else:
+        if not args.column:
             fig.suptitle(f"{args.dataset} (seed {RAND_SEED}): {kind} by fusion method{suffix}", fontsize=15)
         if args.column:
-            # Axes only on the outer panels: no ticks between neighbouring panels.
             for ax in axes.ravel():
                 ax.tick_params(bottom=ax.get_subplotspec().is_last_row(),
                                left=ax.get_subplotspec().is_first_col())
