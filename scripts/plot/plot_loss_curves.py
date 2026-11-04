@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from configuration_files.configuration import RAND_SEED, method_threshold
+from configuration_files.configuration import ATTACK_CLASSES, RAND_SEED, attacked_mask, method_threshold
 from configuration_files.paths import dataset_result_root
 
 ATTACKS = [("PGD", "pgd", "image"), ("TREPAT", "trepat", "text"), ("Joint", "interleaved", None)]
@@ -56,7 +56,7 @@ def flip_times(root, attack, method, dataset):
     p = pd.read_csv(os.path.join(run, "perturbed_results.csv")).set_index("index")
     log = pd.read_csv(os.path.join(run, "loss_log.csv"))
     t = method_threshold(method, dataset)
-    ok = c.index[c["pred"] == c["label"]]
+    ok = c.index[(c["pred"] == c["label"]) & attacked_mask(c["label"])]
     budget = log.groupby(["channel", "index"]).size().groupby("channel").max().to_dict()
     if attack == "interleaved":
         # Joint runs max(PGD steps, TREPAT variants) rounds; round r holds PGD
@@ -120,10 +120,10 @@ def main():
                 labels.append(l)
     fig.legend(handles, labels, loc="lower center", ncol=len(labels), bbox_to_anchor=(0.5, 1.0),
                frameon=False, fontsize=10)
-    fig.suptitle(f"{args.dataset} (seed {RAND_SEED}): ASR vs attack budget", fontsize=13, y=1.12)
+    fig.suptitle(f"{args.dataset} (seed {RAND_SEED}, attacked classes: {ATTACK_CLASSES}): ASR vs attack budget", fontsize=13, y=1.12)
     fig.tight_layout()
     os.makedirs(OUT_DIR, exist_ok=True)
-    stem = os.path.join(OUT_DIR, f"{args.dataset}_seed{RAND_SEED}_loss_curves")
+    stem = os.path.join(OUT_DIR, f"{args.dataset}_seed{RAND_SEED}_{ATTACK_CLASSES}_loss_curves")
     for ext in ("png", "pdf"):
         fig.savefig(f"{stem}.{ext}", dpi=200, bbox_inches="tight")
     print(f"wrote {stem}.{{png,pdf}}")

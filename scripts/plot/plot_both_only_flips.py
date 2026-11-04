@@ -21,7 +21,7 @@ import pandas as pd
 from matplotlib.lines import Line2D
 
 import plot_score_space_grid as G
-from configuration_files.configuration import RAND_SEED, method_threshold
+from configuration_files.configuration import ATTACK_CLASSES, RAND_SEED, attacked_mask, method_threshold
 from configuration_files.paths import dataset_result_root
 
 UNIMODAL = ("pgd", "trepat")
@@ -36,26 +36,21 @@ def flips(root, attack, method, clean):
     """(flipped clean-correct mask, attacked results)."""
     p = pd.read_csv(os.path.join(root, "perturbed", attack, method, "perturbed_results.csv"))
     p = p.set_index("index").reindex(clean.index)
-    flipped = (clean["pred"] == clean["label"]) & (p["pred"] != clean["label"])
+    flipped = (clean["pred"] == clean["label"]) & (p["pred"] != clean["label"]) & attacked_mask(clean["label"])
     return flipped, p
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dataset", default="Fakeddit")
-    ap.add_argument("--out-dir", default=G.FIG_DIR)
-    args = ap.parse_args()
-    root = dataset_result_root(args.dataset)
-
+def draw(fig, dataset):
+    """Draw the 2x3 panels into ``fig`` (a figure or subfigure); returns legend handles."""
+    root = dataset_result_root(dataset)
     G.LOGIT_TICKS[:] = [-10, 0, 10]
     ticks = list(G.sigmoid(np.array(G.LOGIT_TICKS, dtype=float)))
-    plt.rcParams.update({"font.size": 13})
     from models.fusion import fusion_head_path
-    heads = {r: G.TorchHead(r, args.dataset) for r in ("svm-rbf", "linear")
-             if os.path.isfile(fusion_head_path(r, args.dataset))}
-    space = G.head_input_space(args.dataset)
+    heads = {r: G.TorchHead(r, dataset) for r in ("svm-rbf", "linear")
+             if os.path.isfile(fusion_head_path(r, dataset))}
+    space = G.head_input_space(dataset)
 
-    fig, axes = plt.subplots(2, 3, figsize=(7.2, 4.9), sharex=True, sharey=True)
+    axes = fig.subplots(2, 3, sharex=True, sharey=True)
     for k, (ax, method) in enumerate(zip(axes.ravel(), G.METHODS)):
         clean = pd.read_csv(os.path.join(root, "clean", method, "results.csv")).set_index("index")
         uni = np.zeros(len(clean), dtype=bool)
@@ -75,7 +70,7 @@ def main():
         ax.set_yticks(ticks, [f"{t:g}" for t in G.LOGIT_TICKS])
         if method in G.LATE_RULES:
             G.decision_region(ax, method, heads, G.LIMITS, G.LIMITS, space,
-                              threshold=method_threshold(method, args.dataset))
+                              threshold=method_threshold(method, dataset))
             x0, y0 = clean["score_image"].values, clean["score_text"].values
             xcol, ycol = "image_score", "text_score"
         else:
@@ -99,7 +94,7 @@ def main():
                        alpha=0.25, linewidths=0, zorder=2)
 
         # Highlighted: union/joint landing farthest past the boundary, plus PGD and TREPAT.
-        t = method_threshold(method, args.dataset)
+        t = method_threshold(method, dataset)
         lt = np.log(t / (1 - t))
         margin = np.stack([np.abs(logit(clip(both[n][1]["score"].values)) - lt) for n in ("union", "joint")])
         flip_mask = np.stack([both[n][0].values for n in ("union", "joint")])
@@ -130,6 +125,17 @@ def main():
                Line2D([], [], color=UNI_COLORS["trepat"], lw=0.9, label="TREPAT"),
                Line2D([], [], color=BOTH_COLOR, ls="--", label="union"),
                Line2D([], [], color=BOTH_COLOR, ls="-", label="joint")]
+    return handles
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--dataset", default="Fakeddit")
+    ap.add_argument("--out-dir", default=G.FIG_DIR)
+    args = ap.parse_args()
+    plt.rcParams.update({"font.size": 13})
+    fig = plt.figure(figsize=(7.2, 4.9))
+    handles = draw(fig, args.dataset)
     fig.supxlabel("image logit", fontsize=15)
     fig.supylabel("text logit", fontsize=15)
     fig.tight_layout()
@@ -138,7 +144,7 @@ def main():
                frameon=False, fontsize=10, handletextpad=0.3, columnspacing=0.8, handlelength=1.5)
     out = os.path.join(args.out_dir, "unimodal_scores", args.dataset)
     os.makedirs(out, exist_ok=True)
-    stem = os.path.join(out, f"{args.dataset}_seed{RAND_SEED}_both_only_flips")
+    stem = os.path.join(out, f"{args.dataset}_seed{RAND_SEED}_{ATTACK_CLASSES}_both_only_flips")
     for ext in ("png", "pdf"):
         fig.savefig(f"{stem}.{ext}", dpi=200, bbox_inches="tight")
     print(f"wrote {stem}.{{png,pdf}}")

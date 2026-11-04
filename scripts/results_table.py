@@ -3,8 +3,10 @@ kept separate. Writes only into the results folder of the run
 (results/<dataset>/<subset>/<seed>/): CSV files with every metric and
 Markdown tables with the reported ones. No LaTeX, nothing outside results/.
 
-Real (label 1) is the positive class; predictions use each method's own
-threshold (score > threshold). Metrics computed for every row: n, n_real,
+The positive class comes from config.yaml; predictions use each method's own
+threshold (score > threshold -> Real). Tables go to <seed>/<attack_classes>/;
+with attack_classes: fake, Real samples count as not attacked, even in a run
+that attacked both classes. Metrics computed for every row: n, n_real,
 n_fake, AUC, accuracy, balanced_accuracy, TPR, FPR, TNR, FNR, precision, F1.
 
 * Clean (metrics_clean.csv, results_clean.md): AUC, accuracy, TPR, FPR.
@@ -40,7 +42,8 @@ from sklearn.metrics import roc_auc_score
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from configuration_files.paths import dataset_result_root  # noqa: E402
-from configuration_files.configuration import RAND_SEED  # noqa: E402
+from configuration_files.configuration import (  # noqa: E402
+    ATTACK_CLASSES, POSITIVE_CLASS, POSITIVE_LABEL, RAND_SEED, attacked_mask)
 
 ATTACKS = [("PGD", "pgd"), ("TREPAT", "trepat"), ("Union", "sum"), ("Joint", "interleaved")]
 # Reporting order. Union = the "sum" attack (perturbed/sum, half budget per modality).
@@ -51,7 +54,7 @@ CLEAN_COLS = [("AUC", "AUC"), ("Acc", "accuracy"), ("TPR", "TPR"), ("FPR", "FPR"
 ADV_COLS = [("TPR", "TPR"), ("FPR", "FPR"), ("ASR", "ASR")]
 
 
-def threshold_of(run_dir):
+def threshold_of(run_dir, key="Threshold"):
     p = os.path.join(run_dir, "parameters.json")
     if not os.path.isfile(p):
         return None
@@ -59,16 +62,17 @@ def threshold_of(run_dir):
         params = json.load(f)
     # Attack runs nest their settings; clean runs store them at the top level.
     for block in (params, *[v for v in params.values() if isinstance(v, dict)]):
-        if "Threshold" in block:
-            return block["Threshold"]
+        if key in block:
+            return block[key]
     return None
 
 
 def classification_metrics(label, score, pred):
     real, fake = label == 1, label == 0
-    tp, fp = int((pred[real] == 1).sum()), int((pred[fake] == 1).sum())
-    fn, tn = int(real.sum()) - tp, int(fake.sum()) - fp
-    tpr, fpr = tp / max(real.sum(), 1), fp / max(fake.sum(), 1)
+    pos, neg = label == POSITIVE_LABEL, label != POSITIVE_LABEL
+    tp, fp = int((pred[pos] == POSITIVE_LABEL).sum()), int((pred[neg] == POSITIVE_LABEL).sum())
+    fn, tn = int(pos.sum()) - tp, int(neg.sum()) - fp
+    tpr, fpr = tp / max(pos.sum(), 1), fp / max(neg.sum(), 1)
     return {
         "n": len(label), "n_real": int(real.sum()), "n_fake": int(fake.sum()),
         "AUC": (roc_auc_score(label, score) if score is not None and real.any() and fake.any()
@@ -109,13 +113,13 @@ def evaluate_adv(root, method):
     rows = []
 
     def attacked_row(name, y, score, pred_clean, pred_adv, threshold):
-        correct, wrong_adv = pred_clean == y, pred_adv != y
+        correct, wrong_adv = (pred_clean == y) & attacked_mask(y), pred_adv != y
         n_ok = int(correct.sum())
         row = {"method": method, "scenario": name, "threshold": threshold,
                **classification_metrics(y, score, pred_adv)}
         row.update({"dTPR": row["TPR"] - clean["TPR"], "dFPR": row["FPR"] - clean["FPR"],
                     "n_clean_correct": n_ok, "n_flipped": int((correct & wrong_adv).sum()),
-                    "n_fixed": int((~correct & ~wrong_adv).sum()),
+                    "n_fixed": int(((pred_clean != y) & ~wrong_adv).sum()),
                     "ASR": (correct & wrong_adv).sum() / n_ok if n_ok else np.nan})
         return row
 
@@ -128,13 +132,17 @@ def evaluate_adv(root, method):
         if t_clean is None or t_adv is None or not np.isclose(t_adv, t_clean, rtol=0, atol=1e-12):
             print(f"WARNING: {attack}/{method} threshold {t_adv} != clean {t_clean}: stale run, skipped")
             continue
+        if ATTACK_CLASSES == "both" and threshold_of(run_dir, "Targeted"):
+            print(f"WARNING: {attack}/{method} attacked one class only: skipped for attack_classes both")
+            continue
         p = pd.read_csv(pert_csv)
-        m = c[["index", "label", "pred"]].merge(p[["index", "score", "pred"]], on="index",
-                                                suffixes=("_clean", "_adv"))
+        m = c[["index", "label", "pred", "score"]].merge(p[["index", "score", "pred"]], on="index",
+                                                         suffixes=("_clean", "_adv"))
         if len(m) != len(c):
             print(f"WARNING: {attack}/{method} has {len(m)} of {len(c)} samples")
-        rows.append(attacked_row(name, m["label"].values, m["score"].values,
-                                 m["pred_clean"].values, m["pred_adv"].values, t_adv))
+        hit = attacked_mask(m["label"])
+        rows.append(attacked_row(name, m["label"].values, m["score_adv"].where(hit, m["score_clean"]).values,
+                                 m["pred_clean"].values, m["pred_adv"].where(hit, m["pred_clean"]).values, t_adv))
 
     order = {sc: k for k, sc in enumerate(SCENARIOS)}
     return sorted(rows, key=lambda r: order[r["scenario"]])
@@ -224,10 +232,13 @@ def attack_overlap_asr(root, method):
     neither union nor joint); union or joint only (but neither PGD nor TREPAT),
     and within it union only and joint only."""
     c = pd.read_csv(os.path.join(root, "clean", method, "results.csv")).set_index("index")
-    ok = (c["pred"] == c["label"]).values
+    ok = ((c["pred"] == c["label"]) & attacked_mask(c["label"])).values
 
     def flipped(attack):
-        p = pd.read_csv(os.path.join(root, "perturbed", attack, method, "perturbed_results.csv"))
+        run_dir = os.path.join(root, "perturbed", attack, method)
+        if ATTACK_CLASSES == "both" and threshold_of(run_dir, "Targeted"):
+            raise FileNotFoundError(f"{run_dir} attacked one class only")
+        p = pd.read_csv(os.path.join(run_dir, "perturbed_results.csv"))
         return ok & (p.set_index("index")["pred"].reindex(c.index).values != c["label"].values)
 
     uni = flipped("pgd") | flipped("trepat")
@@ -250,6 +261,8 @@ def main():
     ap.add_argument("--dataset", required=True)
     args = ap.parse_args()
     root = dataset_result_root(args.dataset)
+    out = os.path.join(root, ATTACK_CLASSES)
+    os.makedirs(out, exist_ok=True)
 
     clean = pd.DataFrame([r for _, m in METHODS for r in evaluate_clean(root, m)])
     if clean.empty:
@@ -257,11 +270,12 @@ def main():
     ablation = pd.DataFrame([r for _, m in ABLATION_METHODS for r in evaluate_ablation(root, args.dataset, m)])
     adv = pd.DataFrame([r for _, m in METHODS for r in evaluate_adv(root, m)])
     # Every saved result names the dataset and test-subset seed it was computed on.
-    tag = f"{args.dataset} (seed {RAND_SEED})"
+    tag = f"{args.dataset} (seed {RAND_SEED}, attacked classes: {ATTACK_CLASSES})"
     for name, frame in (("clean", clean), ("ablation", ablation), ("adv", adv)):
+        frame.insert(0, "attack_classes", ATTACK_CLASSES)
         frame.insert(0, "seed", RAND_SEED)
         frame.insert(0, "dataset", args.dataset)
-        frame.to_csv(os.path.join(root, f"metrics_{name}.csv"), index=False)
+        frame.to_csv(os.path.join(out, f"metrics_{name}.csv"), index=False)
 
     def get(frame, m, k, **where):
         sel = frame["method"] == m if not frame.empty else None
@@ -273,7 +287,7 @@ def main():
     from configuration_files.configuration import thresholds_path
     with open(thresholds_path(args.dataset)) as f:
         th = json.load(f)["thresholds"]
-    write_table(os.path.join(root, "results_thresholds"), f"{tag}, calibrated thresholds",
+    write_table(os.path.join(out, "results_thresholds"), f"{tag}, calibrated thresholds",
                 ["Method", "Threshold", "Logit", "Val TPR", "Val FPR"],
                 [[name, f"{th[m]['threshold']:.5f}",
                   f"{np.log(th[m]['threshold'] / (1 - th[m]['threshold'])):.2f}",
@@ -281,8 +295,8 @@ def main():
                  for name, m in METHODS if m in th])
 
     # Clean
-    write_table(os.path.join(root, "results_clean"),
-                f"{tag}, clean test set (Real = positive, per-method threshold)",
+    write_table(os.path.join(out, "results_clean"),
+                f"{tag}, clean test set ({POSITIVE_CLASS} = positive, per-method threshold)",
                 ["Method"] + [h for h, _ in CLEAN_COLS],
                 [[name] + [fmt(get(clean, m, k)) for _, k in CLEAN_COLS] for name, m in METHODS])
 
@@ -290,7 +304,7 @@ def main():
     if not ablation.empty:
         cols = [("AUC", "AUC"), ("Acc", "accuracy")]
         conds = [c for c in ABLATION_CONDITIONS if c[1] != "both"]
-        write_table(os.path.join(root, "results_ablation"),
+        write_table(os.path.join(out, "results_ablation"),
                     f"{tag}, missing-modality ablation (change from both modalities in parentheses)",
                     ["Method"] + [f"{h} {c}" for h, _ in conds for c, _ in cols],
                     [[name] + [with_delta(get(ablation, m, k, condition=cond),
@@ -300,7 +314,7 @@ def main():
 
     # Adversarial
     if not adv.empty:
-        write_table(os.path.join(root, "results_adv"),
+        write_table(os.path.join(out, "results_adv"),
                     f"{tag}, attacked test set (TPR/FPR on all samples, change from clean in "
                     f"parentheses; ASR on clean-correct; Union = sum attack, half budget each)",
                     ["Method"] + [f"{sc} {h}" for sc in SCENARIOS for h in ("TPR (Δ)", "FPR (Δ)", "ASR")],
@@ -316,15 +330,16 @@ def main():
         except FileNotFoundError as e:
             print(f"attack split skipped: {e}")
         else:
+            split.insert(0, "attack_classes", ATTACK_CLASSES)
             split.insert(0, "seed", RAND_SEED)
             split.insert(0, "dataset", args.dataset)
-            split.to_csv(os.path.join(root, "metrics_attack_split.csv"), index=False)
-            write_table(os.path.join(root, "results_attack_split"),
+            split.to_csv(os.path.join(out, "metrics_attack_split.csv"), index=False)
+            write_table(os.path.join(out, "results_attack_split"),
                         f"{tag}, ASR (%) split by the attacks that succeed",
                         ["Method"] + [h for h, _ in SPLIT_COLS],
                         [[name] + [f"{split.set_index('method').at[m, k]:.1f}" for _, k in SPLIT_COLS]
                          for name, m in ABLATION_METHODS])
-    print(f"wrote metrics_*.csv and results_*.md in {root}")
+    print(f"wrote metrics_*.csv and results_*.md in {out}")
 
 
 if __name__ == "__main__":

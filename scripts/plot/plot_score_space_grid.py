@@ -21,7 +21,7 @@ import pandas as pd
 
 from matplotlib.collections import LineCollection
 
-from configuration_files.configuration import THRESHOLD, DATASET, RAND_SEED, method_threshold
+from configuration_files.configuration import ATTACK_CLASSES, THRESHOLD, DATASET, RAND_SEED, attacked_mask, method_threshold
 from configuration_files.paths import dataset_result_root
 
 LATE_RULES = ("min", "mean", "max", "svm-rbf", "linear")
@@ -221,8 +221,9 @@ def _clean_vs_attacked(result_root, method, attack_dir):
     attacked = load_perturbed(result_root, attack_dir, method)
     if clean is None or attacked is None:
         return None
-    return clean[["index", "label", "pred"]].merge(
+    merged = clean[["index", "label", "pred"]].merge(
         attacked[["index", "pred"]], on="index", suffixes=("_clean", "_adv"))
+    return merged[attacked_mask(merged["label"])]
 
 
 def flipped_ids(result_root, method, attack_dir):
@@ -514,7 +515,7 @@ def main():
         if args.column:
             fig.subplots_adjust(wspace=0.05, hspace=0.05)
 
-        stem = f"{args.dataset}_seed{RAND_SEED}_score_space_{scenario.replace('+', '_').lower()}"
+        stem = f"{args.dataset}_seed{RAND_SEED}_{ATTACK_CLASSES}_score_space_{scenario.replace('+', '_').lower()}"
         if args.unique:
             stem += "_unique"
         if args.path and scenario != "clean":

@@ -1,10 +1,9 @@
 """Tune one decision threshold per method on the validation split.
 
-Real (label 1) is the positive class and the score is P(Real): a higher score
-means Real. Predictions everywhere are ``score > t`` -> Real. The threshold is
-the ROC operating point on the validation split (both classes): among
-thresholds with FPR = P(predicted Real | Fake) <= ``threshold_fpr``
-(config.yaml), the one with the highest TPR = P(predicted Real | Real).
+The positive class comes from config.yaml; the score stays P(Real) and
+predictions everywhere are ``score > t`` -> Real. The threshold is the ROC
+operating point on the validation split (both classes): among thresholds with
+FPR <= ``threshold_fpr`` (config.yaml), the one with the highest TPR.
 
 Steps:
   1. GPU: score the full non-augmented validation split with the text-only,
@@ -34,7 +33,8 @@ import pandas as pd
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from configuration_files.configuration import (
-    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, OVERWRITE, PIPELINE_LATE_FUSION_MODES, RAND_SEED, TRAIN_SEED,
+    DATASET, HEAD_CV_FOLDS, NAME_IMG_EMBED, OVERWRITE, PIPELINE_LATE_FUSION_MODES, POSITIVE_CLASS, POSITIVE_LABEL,
+    RAND_SEED, TRAIN_SEED,
     THRESHOLD_FPR, dataset_devices, image_weights_path, thresholds_path,
 )
 from configuration_files.paths import dataset_result_root
@@ -48,20 +48,15 @@ def val_csv(dataset, method):
 
 
 def fpr_threshold(scores, labels, fpr):
-    """ROC operating point on both classes, Real (label 1) = positive.
-
-    Predict Real iff score > t. Candidates are all validation scores of both
-    classes; among those with FPR = P(score > t | Fake) <= fpr, pick the one
-    with the highest TPR = P(score > t | Real) (ties: lower FPR, then larger t).
-    """
-    real, fake = np.sort(scores[labels == 1]), np.sort(scores[labels == 0])
+    """Threshold with the highest TPR among FPR <= fpr (ties: lower FPR, then the stricter t)."""
+    pos, neg = np.sort(scores[labels == POSITIVE_LABEL]), np.sort(scores[labels != POSITIVE_LABEL])
     cands = np.unique(np.concatenate([scores, [np.nextafter(scores.min(), -np.inf)]]))
-    tpr_c = 1 - np.searchsorted(real, cands, side="right") / len(real)
-    fpr_c = 1 - np.searchsorted(fake, cands, side="right") / len(fake)
+    below = lambda a: np.searchsorted(a, cands, side="right") / len(a)
+    tpr_c, fpr_c = (1 - below(pos), 1 - below(neg)) if POSITIVE_LABEL else (below(pos), below(neg))
     ok = np.where(fpr_c <= fpr)[0]
-    best = max(ok, key=lambda k: (tpr_c[k], -fpr_c[k], cands[k]))
+    best = max(ok, key=lambda k: (tpr_c[k], -fpr_c[k], cands[k] if POSITIVE_LABEL else -cands[k]))
     if tpr_c[best] == 0:
-        print(f"  WARNING: no threshold reaches FPR <= {fpr} with any Real predicted (saturated scores)")
+        print(f"  WARNING: no threshold reaches FPR <= {fpr} with any {POSITIVE_CLASS} predicted (saturated scores)")
     return float(cands[best])
 
 
@@ -123,19 +118,19 @@ def main():
             scores[mode] = static_rule_scores(mode, scores["text"], scores["image"])
 
     table = {}
-    print(f"\n{'method':15s} {'threshold':>12s} {'val FPR':>8s} {'val TPR':>8s}   (Real = positive)")
+    print(f"\n{'method':15s} {'threshold':>12s} {'val FPR':>8s} {'val TPR':>8s}   ({POSITIVE_CLASS} = positive)")
     for method, s in scores.items():
         thr = fpr_threshold(s, labels, args.fpr)
-        pred_real = s > thr
-        fpr = float(pred_real[labels == 0].mean())
-        tpr = float(pred_real[labels == 1].mean())
+        pred_pos = (s > thr) == bool(POSITIVE_LABEL)
+        fpr = float(pred_pos[labels != POSITIVE_LABEL].mean())
+        tpr = float(pred_pos[labels == POSITIVE_LABEL].mean())
         table[method] = {"threshold": thr, "val_fpr": round(fpr, 4), "val_tpr": round(tpr, 4)}
         print(f"{method:15s} {thr:12.6g} {fpr:8.3f} {tpr:8.3f}")
 
     out = thresholds_path(args.dataset)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
-        json.dump({"dataset": args.dataset, "split": "val (non-augmented)", "positive_class": "Real",
+        json.dump({"dataset": args.dataset, "split": "val (non-augmented)", "positive_class": POSITIVE_CLASS,
                    "target_fpr": args.fpr, "n_real": int((labels == 1).sum()),
                    "n_fake": int((labels == 0).sum()),
                    "rule": "predict Real iff P(Real) > threshold",

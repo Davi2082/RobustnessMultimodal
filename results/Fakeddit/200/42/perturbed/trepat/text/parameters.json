@@ -13,8 +13,9 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 13.8,
+        "Threshold": 0.999912,
+        "Split": "test",
+        "Runtime (s)": 17.1,
         "Subset Size": 200,
         "Random Seed": 42
     },
@@ -28,7 +29,7 @@
         "Max Candidates per Word": 64,
         "Max Words for Importance": 1024
     },
-    "Runtime (s)": 419.3,
+    "Runtime (s)": 864.5,
     "Subset Size": 200,
     "Random Seed": 42
 }

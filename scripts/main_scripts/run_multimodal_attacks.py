@@ -30,7 +30,7 @@ import argparse, json, os, subprocess, sys, time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from configuration_files.configuration import (
     _number,
-    ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS, PIPELINE_FUSIONS, dataset_devices,
+    ATTACK_CLASSES, ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS, PIPELINE_FUSIONS, dataset_devices,
 )
 from configuration_files.paths import (
     clean_image_params, clean_text_params, late_fusion_data_dir, model_perturbed_dir,
@@ -62,6 +62,8 @@ def build_base_cmd(attack, fusion, dataset):
                "--dataset", dataset]
         if fusion == "svm-rbf":
             cmd += ["--svm-model", fusion_head_path("svm-rbf", dataset)]
+    if ATTACK_CLASSES == "fake":
+        cmd.append("--targeted")
     return cmd
 
 

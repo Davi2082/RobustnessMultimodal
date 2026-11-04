@@ -2,7 +2,7 @@ import os, json, argparse
 import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_curve, auc
-from configuration_files.configuration import ATTACK_SCOPE, DATASET, PIPELINE_ATTACKS
+from configuration_files.configuration import ATTACK_SCOPE, DATASET, OVERWRITE, PIPELINE_ATTACKS, POSITIVE_LABEL
 from configuration_files.paths import model_clean_dir, model_perturbed_dir
 from scripts.utils.utils import compute_metrics, plot_confusion_matrix, build_curve_name, update_roc_cache, regenerate_plot
 
@@ -51,11 +51,11 @@ if __name__ == "__main__":
         parser.error(f"Results file not found: {csv_path}")
     df = pd.read_csv(csv_path)
 
-    y_true = 1 - np.asarray(df["label"])
-    y_pred = 1 - np.asarray(df["pred"])
-    scores = 1 - np.asarray(df["score"])
+    y_true = (np.asarray(df["label"]) == POSITIVE_LABEL).astype(int)
+    y_pred = (np.asarray(df["pred"]) == POSITIVE_LABEL).astype(int)
+    scores = np.asarray(df["score"]) if POSITIVE_LABEL else 1 - np.asarray(df["score"])
 
-    if os.path.exists(os.path.join(base, "metrics.json")):
+    if os.path.exists(os.path.join(base, "metrics.json")) and not OVERWRITE:
         fpr, tpr, thr = roc_curve(y_true, scores)
         auc_score = auc(fpr, tpr)
     else:

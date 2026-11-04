@@ -1,9 +1,9 @@
 {
     "Fusion": {
         "Type": "svm-rbf",
-        "Threshold": 0.5,
-        "SVM Model": "/mnt/dati/tailscale/RobustnessMultimodal/checkpoints/Fakeddit/svm_rbf_head.pkl",
-        "SVM Input": "scores"
+        "Threshold": 0.7896216511726379,
+        "SVM Model": "/disk1/home/heddoubi/projects/RobustnessMultimodal/checkpoints/Fakeddit/svm_rbf_head.pkl",
+        "SVM Input": "logits"
     },
     "Scenario": "text",
     "Attack": {
@@ -23,8 +23,9 @@
         "Budgets Are Effective": true,
         "PGD Iters": null,
         "TRePAT Max Variants": 100,
-        "Epsilon": 0.03137254901960784,
-        "Alpha Factor": 0.01,
+        "Epsilon": 0.00392156862745098,
+        "Alpha Factor": 0.4,
+        "Random Start": false,
         "Alpha": null,
         "K (BERT Attack)": 48,
         "Threshold Pred Score": 0,
@@ -47,8 +48,9 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 13.8,
+        "Threshold": 0.999912,
+        "Split": "test",
+        "Runtime (s)": 17.1,
         "Subset Size": 200,
         "Random Seed": 42
     },
@@ -66,13 +68,14 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 10.4,
+        "Threshold": 0.87487775,
+        "Split": "test",
+        "Runtime (s)": 12.4,
         "Subset Size": 200,
         "Random Seed": 42
     },
-    "Runtime (s)": 8459.7,
+    "Runtime (s)": 643.1,
     "Subset Size": 200,
     "Random Seed": 42,
-    "Num Shards": 4
+    "Num Shards": 2
 }

@@ -374,6 +374,7 @@ def parse_args() -> tuple[argparse.Namespace, dict[str, Any], dict[str, Any]]:
     parser.add_argument("--threshold", type=float, default=THRESHOLD)
     parser.add_argument("--source-label", type=int, default=SOURCE_LABEL)
     parser.add_argument("--target-label", type=int, default=TARGET_LABEL)
+    parser.add_argument("--targeted", action="store_true", help="attack only source-label samples")
     parser.add_argument("--subset-size", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -426,12 +427,9 @@ def save_parameters(path: Path, args, text_parameters, image_parameters, runtime
             "ASCII Candidates Only": args.ascii_only,
             "Whole-Word Flips": args.word_level,
             "Minimum Text Similarity": args.min_txt_similarity,
-            # This attack is untargeted: the sample filter below is
-            # clean_prediction == label, so both classes are attacked and
-            # source/target label play no role. Recorded as such.
-            "Targeted": False,
-            "Source Label": "all (per-sample 1-label)",
-            "Target Label": "all (per-sample 1-label)",
+            "Targeted": args.targeted,
+            "Source Label": (args.source_label if args.targeted else "all (per-sample 1-label)"),
+            "Target Label": (args.target_label if args.targeted else "all (per-sample 1-label)"),
             "Only Clean-Correct Samples": True,
             "Number of Tokens": args.n_tokens,
         },
@@ -544,8 +542,9 @@ def main() -> None:
 
             clean_is_source = (
                 int(clean_predictions[position].item()) == label
+                and (not args.targeted or label == args.source_label)
             )
-            if clean_is_source:  # untargeted: attack every correctly-classified sample
+            if clean_is_source:
                 attacked += 1
                 result = joint_attack(
                     model,

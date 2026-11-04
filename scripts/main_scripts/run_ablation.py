@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 
-from configuration_files.configuration import DATASET, dataset_devices, method_threshold
+from configuration_files.configuration import DATASET, POSITIVE_LABEL, dataset_devices, method_threshold
 from scripts.utils.devices import resolve_devices
 
 LATE_FUSION_MODES = ("min", "mean", "max", "svm-rbf", "linear")
@@ -62,15 +62,15 @@ def fuse_scores(s_txt, s_img, mode, dataset):
 
 
 def compute_metrics(y_true, scores, threshold):
-    """AUC, F1, Acc, TPR, FPR with Real (label 1) as the positive class, at the
+    """AUC, F1, Acc, TPR, FPR with config positive_class as the positive class, at the
     method's own threshold (the same one used everywhere in the experiment)."""
     y_pred = (scores > threshold).astype(int)
     return {
         "AUC": roc_auc_score(y_true, scores),
-        "F1": f1_score(y_true, y_pred),
+        "F1": f1_score(y_true, y_pred, pos_label=POSITIVE_LABEL),
         "Acc": accuracy_score(y_true, y_pred),
-        "TPR": float(np.mean(y_pred[y_true == 1] == 1)),
-        "FPR": float(np.mean(y_pred[y_true == 0] == 1)),
+        "TPR": float(np.mean(y_pred[y_true == POSITIVE_LABEL] == POSITIVE_LABEL)),
+        "FPR": float(np.mean(y_pred[y_true != POSITIVE_LABEL] == POSITIVE_LABEL)),
     }
 
 

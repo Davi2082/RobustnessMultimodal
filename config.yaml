@@ -4,8 +4,8 @@
 # are taken from this file.
 
 # Pipeline parameters - run_scripts.sh
-overwrite: 1
-rand_seed: [42, 43, 44]  # test-subset seeds (one value or a list); run_scripts.sh runs once per seed -> results/<ds>/200/<seed>/
+overwrite: 0
+rand_seed: [42, 43, 44, 45, 46, 47, 48, 49, 50]  # test-subset seeds (one value or a list); run_scripts.sh runs once per seed -> results/<ds>/200/<seed>/
 train_seed: 42  # models, fusion heads and threshold folds; fixed across test subsets
 attack_seed: 0  # fixed per-sample attack seed (seed + sample index); null = unseeded
 
@@ -33,10 +33,11 @@ name_llm: TinyLlama/TinyLlama-1.1B-Chat-v1.0
 name_img_embed: openai/clip-vit-base-patch32
 batch_size: 128
 n_tokens: 256
+positive_class: fake  # fake or real: training metrics, thresholds, all evaluation
 # Decision threshold on P(Real) (predict Real iff score > threshold):
 #   a number, e.g. 0.5, used by every method; or
 #   calibrated: one threshold per method, tuned on the validation split (ROC on
-#     both classes, Real = positive) so that FPR = share of Fake predicted Real
+#     both classes) so that FPR = share of the negative class predicted positive
 #     <= threshold_fpr; stored in checkpoints/<ds>/thresholds.json, written by
 #     scripts/main_scripts/compute_thresholds.py.
 threshold: calibrated
@@ -91,6 +92,7 @@ training_late_fusion:
     learning_rate: 1e-2
 
 # Attack parameters (for targetted attacks)
+attack_classes: fake  # fake: attack and evaluate Fake -> Real only; both: both classes. A both run can be evaluated as fake, not the reverse
 source_label: 0  # Fake
 target_label: 1  # Real
 

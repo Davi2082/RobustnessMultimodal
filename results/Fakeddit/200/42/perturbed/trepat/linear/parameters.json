@@ -1,7 +1,7 @@
 {
     "Fusion": {
         "Type": "linear",
-        "Threshold": 0.5,
+        "Threshold": 0.7401870489120483,
         "SVM Model": null,
         "SVM Input": null
     },
@@ -23,8 +23,9 @@
         "Budgets Are Effective": true,
         "PGD Iters": null,
         "TRePAT Max Variants": 100,
-        "Epsilon": 0.03137254901960784,
-        "Alpha Factor": 0.01,
+        "Epsilon": 0.00392156862745098,
+        "Alpha Factor": 0.4,
+        "Random Start": false,
         "Alpha": null,
         "K (BERT Attack)": 48,
         "Threshold Pred Score": 0,
@@ -47,8 +48,9 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 13.8,
+        "Threshold": 0.999912,
+        "Split": "test",
+        "Runtime (s)": 17.1,
         "Subset Size": 200,
         "Random Seed": 42
     },
@@ -66,13 +68,14 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 10.4,
+        "Threshold": 0.87487775,
+        "Split": "test",
+        "Runtime (s)": 12.4,
         "Subset Size": 200,
         "Random Seed": 42
     },
-    "Runtime (s)": 18022.6,
+    "Runtime (s)": 635.7,
     "Subset Size": 200,
     "Random Seed": 42,
-    "Num Shards": 4
+    "Num Shards": 2
 }

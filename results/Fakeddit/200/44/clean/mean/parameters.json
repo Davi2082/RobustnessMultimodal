@@ -1,0 +1,7 @@
+{
+    "Modality": "late-fusion",
+    "Fusion Mode": "mean",
+    "Threshold": 0.82588952,
+    "Text CSV": "results/Fakeddit/200/44/clean/text/results.csv",
+    "Image CSV": "results/Fakeddit/200/44/clean/image/results.csv"
+}

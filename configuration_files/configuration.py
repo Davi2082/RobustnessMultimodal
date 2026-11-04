@@ -186,6 +186,17 @@ SUBSET_SIZE = dataset_subset_size()
 # Attack parameters
 SOURCE_LABEL = _CFG["source_label"]  # Fake
 TARGET_LABEL = _CFG["target_label"]  # Real
+POSITIVE_CLASS = _CFG["positive_class"]
+POSITIVE_LABEL = {"fake": 0, "real": 1}[POSITIVE_CLASS]
+ATTACK_CLASSES = _CFG["attack_classes"]
+assert ATTACK_CLASSES in ("fake", "both"), f"attack_classes: {ATTACK_CLASSES}"
+
+
+def attacked_mask(label):
+    """Samples whose attack is evaluated."""
+    return label == 0 if ATTACK_CLASSES == "fake" else label >= 0
+
+
 ## Image attack parameters
 PGD_ITERS = _CFG["pgd_iters"]  # 50 steps
 EPSILON = _number(_CFG["epsilon"])  # eps = 16/255

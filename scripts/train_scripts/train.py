@@ -29,7 +29,7 @@ from tqdm import tqdm
 from configuration_files.configuration import (
     BATCH_SIZE, DATASET, EPOCHS, LEARNING_RATE,
     LORA_ALPHA, LORA_DROPOUT, LORA_R, MERGE_TOKENS,
-    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, RAND_SEED, TRAIN_SEED, USE_LORA,
+    NAME_IMG_EMBED, NAME_LLM, NUM_WORKERS, N_TOKENS, POSITIVE_LABEL, RAND_SEED, TRAIN_SEED, USE_LORA,
     dataset_devices, ff_weights_path, image_weights_path, text_weights_path,
 )
 from configuration_files.paths import dataset_weights_dir
@@ -131,9 +131,9 @@ def evaluate(model, loader, criterion, device, model_type):
     return {
         "loss": running_loss / len(loader),
         "accuracy": accuracy_score(labels_all, predictions_all),
-        "precision": precision_score(labels_all, predictions_all, zero_division=0),
-        "recall": recall_score(labels_all, predictions_all, zero_division=0),
-        "f1": f1_score(labels_all, predictions_all, zero_division=0),
+        "precision": precision_score(labels_all, predictions_all, pos_label=POSITIVE_LABEL, zero_division=0),
+        "recall": recall_score(labels_all, predictions_all, pos_label=POSITIVE_LABEL, zero_division=0),
+        "f1": f1_score(labels_all, predictions_all, pos_label=POSITIVE_LABEL, zero_division=0),
     }
 
 

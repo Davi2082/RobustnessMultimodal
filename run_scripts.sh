@@ -31,6 +31,9 @@ M="python3 -m scripts.utils.metrics"
 
 FORCE_FLAG=""
 if [ "$OVERWRITE" -eq 1 ]; then FORCE_FLAG="--force"; fi
+ATTACK_CLASSES=$(python3 -c 'from configuration_files.configuration import ATTACK_CLASSES; print(ATTACK_CLASSES)')
+TARGETED_FLAG=""
+if [ "$ATTACK_CLASSES" = "fake" ]; then TARGETED_FLAG="--targeted"; fi
 
 # One background job per dataset, each on the GPUs in its dataset_configs
 # entry; output goes to logs/pipeline_<dataset>.log.
@@ -78,10 +81,10 @@ run_dataset() {
     # 4. Adversarial attacks + metrics
     if [ "$RUN_ADVERSARIAL" -eq 1 ]; then
         # Unimodal attacks
-        run_step "image attack ($DATASET)" python3 -m attacks.unimodal.image.attack --dataset "$DATASET"
+        run_step "image attack ($DATASET)" python3 -m attacks.unimodal.image.attack --dataset "$DATASET" $FORCE_FLAG $TARGETED_FLAG
         run_step "metrics image/pgd" $M --type perturbed --modality image --attack pgd --dataset "$DATASET"
 
-        run_step "text attack ($DATASET)" python3 -m attacks.unimodal.text.attack --dataset "$DATASET"
+        run_step "text attack ($DATASET)" python3 -m attacks.unimodal.text.attack --dataset "$DATASET" $FORCE_FLAG $TARGETED_FLAG
         run_step "metrics text/trepat" $M --type perturbed --modality text --attack trepat --dataset "$DATASET"
 
         # Multimodal attacks

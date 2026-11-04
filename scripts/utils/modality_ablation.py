@@ -42,7 +42,7 @@ from sklearn.metrics import roc_auc_score, f1_score, accuracy_score
 from data_loading import my_datasets
 from scripts.utils.utils import load_available_datasets, load_model
 from configuration_files.configuration import (
-    NAME_LLM, BATCH_SIZE, N_TOKENS, THRESHOLD, DATASET, build_subset_sampler, dataset_balanced_subset, dataset_devices, dataset_subset_size,
+    NAME_LLM, BATCH_SIZE, N_TOKENS, POSITIVE_LABEL, THRESHOLD, DATASET, build_subset_sampler, dataset_balanced_subset, dataset_devices, dataset_subset_size,
 )
 from configuration_files.paths import dataset_annotations, dataset_images_dir
 from scripts.utils.devices import resolve_devices
@@ -97,20 +97,16 @@ def ff_logits(model, images, texts, ablate=None, mode="blank"):
 
 
 def metrics(y, score, thr):
-    """Fake (label 0) is the positive class, matching the rest of the pipeline.
-
-    TPR = accuracy on Real (label 1),
-    TNR = accuracy on Fake (label 0).
-    """
-    y_true = 1 - y
-    sc = 1 - score
-    y_pred = (sc > thr).astype(int)
+    """Metrics with config positive_class as the positive class."""
+    y_true = (y == POSITIVE_LABEL).astype(int)
+    sc = score if POSITIVE_LABEL else 1 - score
+    y_pred = ((score > thr).astype(int) == POSITIVE_LABEL).astype(int)
     return {
         "AUC": roc_auc_score(y_true, sc),
         "F1": f1_score(y_true, y_pred),
         "Acc": accuracy_score(y_true, y_pred),
-        "TPR": float((y_pred[y == 1] == 0).mean()),
-        "TNR": float((y_pred[y == 0] == 1).mean()),
+        "TPR": float((y_pred[y == POSITIVE_LABEL] == 1).mean()),
+        "TNR": float((y_pred[y != POSITIVE_LABEL] == 0).mean()),
     }
 
 

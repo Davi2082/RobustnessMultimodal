@@ -13,8 +13,9 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 10.4,
+        "Threshold": 0.87487775,
+        "Split": "test",
+        "Runtime (s)": 12.4,
         "Subset Size": 200,
         "Random Seed": 42
     },
@@ -22,11 +23,12 @@
         "Targeted": false,
         "Source Label": "all (per-sample 1-label)",
         "Target Label": 1,
-        "PGD Iters": 10,
-        "Epsilon": 0.03137254901960784,
-        "Alpha Factor": 0.01
+        "PGD Iters": 100,
+        "Epsilon": 0.00392156862745098,
+        "Alpha Factor": 0.4,
+        "Random Start": false
     },
-    "Runtime (s)": 238.1,
+    "Runtime (s)": 2053.4,
     "Subset Size": 200,
     "Random Seed": 42
 }
