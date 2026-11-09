@@ -1,0 +1,7 @@
+{
+    "Modality": "late-fusion",
+    "Fusion Mode": "svm-rbf",
+    "Threshold": 0.9163448214530945,
+    "Text CSV": "results/Recovery/200/43/clean/text/results.csv",
+    "Image CSV": "results/Recovery/200/43/clean/image/results.csv"
+}

@@ -1,9 +1,9 @@
 {
     "Fusion": {
         "Type": "svm-rbf",
-        "Threshold": 0.5,
-        "SVM Model": "/disk1/home/heddoubi/projects/RobustnessMultimodal/checkpoints/Recovery/svm_rbf_head.pkl",
-        "SVM Input": "scores"
+        "Threshold": 0.9163448214530945,
+        "SVM Model": "/mnt/dati/tailscale/RobustnessMultimodal/checkpoints/Recovery/svm_rbf_head.pkl",
+        "SVM Input": "logits"
     },
     "Scenario": "text",
     "Attack": {
@@ -15,9 +15,9 @@
         "Method": "trepat",
         "TRePAT Model": "LLAMA3B",
         "TRePAT Command": "INFORMAL",
-        "Targeted": false,
-        "Source Label": "all (per-sample 1-label)",
-        "Target Label": "all (per-sample 1-label)",
+        "Targeted": true,
+        "Source Label": 0,
+        "Target Label": 1,
         "Only Clean-Correct Source Samples": true,
         "Budget Divisor": 1,
         "Budgets Are Effective": true,
@@ -40,16 +40,17 @@
         "Batch Size": 128,
         "Number of Tokens": 256,
         "Dataset": "Recovery",
-        "Image Embedder Name": "openai/clip-vit-large-patch14",
-        "Model Path": "checkpoints/Recovery/clip-vit-large-patch14_None_8_8_0.4_True10_best_txt_only.pt",
+        "Image Embedder Name": "openai/clip-vit-base-patch32",
+        "Model Path": "checkpoints/Recovery/clip-vit-base-patch32_None_8_8_0.4_True10_best_txt_only.pt",
         "Merge Tokens": null,
         "LoRA Alpha": 8,
         "LoRA R": 8,
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 39.5,
+        "Threshold": 0.90649265,
+        "Split": "test",
+        "Runtime (s)": 15.9,
         "Subset Size": 200,
         "Random Seed": 42
     },
@@ -67,12 +68,14 @@
         "LoRA Dropout": 0.4,
         "Use LoRA": true,
         "Set Params": false,
-        "Threshold": 0.5,
-        "Runtime (s)": 24.2,
+        "Threshold": 0.8971341,
+        "Split": "test",
+        "Runtime (s)": 13.6,
         "Subset Size": 200,
         "Random Seed": 42
     },
-    "Runtime (s)": 2944.3,
+    "Runtime (s)": 2112.3,
     "Subset Size": 200,
-    "Random Seed": 42
+    "Random Seed": 42,
+    "Num Shards": 4
 }

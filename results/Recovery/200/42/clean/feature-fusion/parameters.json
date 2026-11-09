@@ -12,8 +12,9 @@
     "LoRA Dropout": 0.4,
     "Use LoRA": true,
     "Set Params": false,
-    "Threshold": 0.5,
-    "Runtime (s)": 49.5,
+    "Threshold": 0.8343501,
+    "Split": "test",
+    "Runtime (s)": 15.0,
     "Subset Size": 200,
     "Random Seed": 42
 }

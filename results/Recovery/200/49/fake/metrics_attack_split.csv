@@ -1,0 +1,7 @@
+dataset,seed,attack_classes,method,total,unimodal_only,multimodal_only,union_only,joint_only
+Recovery,49,fake,feature-fusion,100.0,0.0,0.0,0.0,0.0
+Recovery,49,fake,min,11.538461538461538,3.8461538461538463,0.0,0.0,0.0
+Recovery,49,fake,mean,13.333333333333334,3.3333333333333335,0.0,0.0,0.0
+Recovery,49,fake,max,68.0,0.0,0.0,0.0,0.0
+Recovery,49,fake,svm-rbf,16.666666666666668,6.666666666666667,0.0,0.0,0.0
+Recovery,49,fake,linear,25.806451612903224,3.225806451612903,0.0,0.0,0.0

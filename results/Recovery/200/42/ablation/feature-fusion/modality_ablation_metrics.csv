@@ -1,7 +1,7 @@
 method,condition,AUC,F1,Acc,TPR,TNR,dAUC,dF1,dAcc,dTPR,dTNR
-feature-fusion (blank),both,0.866,0.74,0.775,0.91,0.64,,,,,
-feature-fusion (blank),image_only,0.701,0.56,0.63,0.79,0.47,-0.165,-0.18,-0.145,-0.12,-0.17
-feature-fusion (blank),text_only,0.322,0.379,0.36,0.33,0.39,-0.544,-0.361,-0.415,-0.58,-0.25
-feature-fusion (drop),both,0.866,0.74,0.775,0.91,0.64,,,,,
-feature-fusion (drop),image_only,0.711,0.624,0.645,0.7,0.59,-0.156,-0.116,-0.13,-0.21,-0.05
-feature-fusion (drop),text_only,0.445,0.577,0.45,0.15,0.75,-0.421,-0.163,-0.325,-0.76,0.11
+feature-fusion (blank),both,0.741,0.4,0.786,0.25,1.0,,,,,
+feature-fusion (blank),image_only,0.742,0.392,0.779,0.25,0.99,0.0,-0.008,-0.007,0.0,-0.01
+feature-fusion (blank),text_only,0.604,0.432,0.643,0.475,0.71,-0.137,0.032,-0.143,0.225,-0.29
+feature-fusion (drop),both,0.741,0.4,0.786,0.25,1.0,,,,,
+feature-fusion (drop),image_only,0.732,0.333,0.771,0.2,1.0,-0.01,-0.067,-0.014,-0.05,0.0
+feature-fusion (drop),text_only,0.53,0.206,0.614,0.175,0.79,-0.211,-0.194,-0.171,-0.075,-0.21
